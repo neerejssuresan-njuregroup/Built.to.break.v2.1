@@ -31,6 +31,7 @@ import { STEPS } from "./data";
 import InteractiveCharts from "./components/InteractiveCharts";
 import RiskSimulator from "./components/RiskSimulator";
 import IndiaComparison from "./components/IndiaComparison";
+import NbcAuditPanel from "./components/NbcAuditPanel";
 import EmberOverlay from "./components/EmberOverlay";
 import DocumentaryInside from "./components/DocumentaryInside";
 import { audioEngine } from "./lib/AudioEngine";
@@ -62,6 +63,7 @@ export default function App() {
   const [preloaderTime, setPreloaderTime] = useState(3);
   const [showDocumentary, setShowDocumentary] = useState(false);
   const [isEnteringDocumentary, setIsEnteringDocumentary] = useState(false);
+  const [showNbcPortal, setShowNbcPortal] = useState(false);
 
   const enterDocumentary = () => {
     setIsEnteringDocumentary(true);
@@ -629,6 +631,21 @@ export default function App() {
                       {step.desc}
                     </p>
 
+                    {/* Step 2 Inline Regulatory Trigger */}
+                    {step.id === "2" && (
+                      <button
+                        onClick={() => setShowNbcPortal(true)}
+                        className="mt-4 w-full flex items-center justify-between px-4 py-2.5 border border-red-950/60 bg-red-950/20 text-[10px] font-mono text-red-400 hover:bg-red-950/40 hover:text-red-300 transition-all rounded-none cursor-pointer"
+                        id="scrolly-nbc-trigger-btn"
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                          LAUNCH REGULATORY EXPLOITATION BOARD ➔
+                        </span>
+                        <span className="text-[9px] font-bold tracking-wider">NBC CODES</span>
+                      </button>
+                    )}
+
                     {/* Inline Chart ONLY shown on mobile screens */}
                     <div className="block lg:hidden mt-6 pt-4 border-t border-zinc-900 h-[340px]">
                       <InteractiveCharts activeStep={step.id} />
@@ -724,8 +741,41 @@ export default function App() {
 
       {/* National Benchmark Comparisons Section */}
       <section className="relative w-full bg-[#050505] border-t border-red-950/30 py-24 px-6" id="section-comparisons">
-        <div className="max-w-7xl mx-auto">
+        <div className="max-w-7xl mx-auto space-y-16 font-sans">
           <IndiaComparison />
+          
+          {/* Regulatory Inquest Callout Banner (Trigger) */}
+          <div className="bg-[#09090B] border border-zinc-900 p-8 md:p-10 relative overflow-hidden shadow-2xl">
+            {/* Warning Hazard border patterns */}
+            <div className="absolute top-0 left-0 right-0 h-1 bg-[repeating-linear-gradient(90deg,#EF4444,#EF4444_15px,transparent_15px,transparent_30px)] opacity-40" />
+            
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+              <div className="lg:col-span-8 space-y-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                  <span className="font-mono text-xs font-black uppercase tracking-[0.25em] text-red-500">
+                    regulatory gap analysis tracker
+                  </span>
+                </div>
+                <h3 className="text-2xl md:text-3xl font-black text-zinc-100 uppercase tracking-tight font-display">
+                  National Building Code (NBC) Loophole Audit Portal
+                </h3>
+                <p className="text-zinc-400 text-xs md:text-sm font-light leading-relaxed max-w-3xl">
+                  Deep dive into the complex regulatory loopholes and "Lal Dora" land exemptions utilized by corporate entities and illegal builders to maximize profits at the expense of human lives. Launch the full interactive board to simulate corporate math, explore specific safety failures, and view mandated rectification options.
+                </p>
+              </div>
+              <div className="lg:col-span-4 flex justify-end">
+                <button
+                  onClick={() => setShowNbcPortal(true)}
+                  className="w-full lg:w-auto px-6 py-4 bg-red-950/40 hover:bg-[#EF4444] border border-red-600/60 text-red-400 hover:text-white font-mono text-xs font-black uppercase tracking-widest transition-all duration-300 shadow-[0_0_25px_rgba(239,68,68,0.15)] hover:shadow-[0_0_45px_rgba(239,68,68,0.5)] active:scale-95 group flex items-center justify-center gap-2.5 rounded-none cursor-pointer"
+                  id="trigger-nbc-portal-action-btn"
+                >
+                  <span>LAUNCH REGULATORY AUDIT BOARD</span>
+                  <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -1031,6 +1081,16 @@ export default function App() {
           <DocumentaryInside 
             onClose={() => setShowDocumentary(false)} 
             audioEngine={audioEngine}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Fullscreen Interactive National Building Code (NBC) Loophole Audit Portal */}
+      <AnimatePresence>
+        {showNbcPortal && (
+          <NbcAuditPanel 
+            isOpen={showNbcPortal}
+            onClose={() => setShowNbcPortal(false)}
           />
         )}
       </AnimatePresence>
