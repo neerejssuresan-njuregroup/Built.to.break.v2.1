@@ -1,0 +1,6 @@
+{
+  "name": "Built to Break: Urban Scrollytelling",
+  "description": "An interactive, highly polished scrollytelling project analyzing urban infrastructure capacity and risk in Indian metropolitan areas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

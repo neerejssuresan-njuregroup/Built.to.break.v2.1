@@ -1,0 +1,82 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;700;900&family=Space+Grotesk:wght@400;500;700;900&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* Custom smooth scrolling */
+html {
+  scroll-behavior: smooth;
+  background-color: #050505;
+}
+
+/* Optimize image rendering and transitions */
+img {
+  image-rendering: auto;
+}
+
+/* Recharts container overrides for absolute positioning stability */
+.recharts-responsive-container {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Scary & Tense Fire/Alarm Keyframes */
+@keyframes fire-flicker {
+  0%, 100% { opacity: 0.25; filter: saturate(1.2) brightness(1); }
+  50% { opacity: 0.55; filter: saturate(1.8) brightness(1.25); }
+}
+
+@keyframes fire-pulse {
+  0% { transform: scale(1); filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.4)); }
+  50% { transform: scale(1.02); filter: drop-shadow(0 0 25px rgba(239, 68, 68, 0.85)) drop-shadow(0 0 45px rgba(249, 115, 22, 0.6)); }
+  100% { transform: scale(1); filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.4)); }
+}
+
+@keyframes alarm-flash {
+  0%, 100% { background-color: rgba(239, 68, 68, 0.03); border-color: rgba(239, 68, 68, 0.1); }
+  50% { background-color: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.55); }
+}
+
+@keyframes text-glitch {
+  0% { text-shadow: 1px 0 0 rgba(239,68,68,0.5), -1px 0 0 rgba(249,115,22,0.5); }
+  40% { text-shadow: -1px 0 0 rgba(239,68,68,0.5), 1px 0 0 rgba(249,115,22,0.5); }
+  80% { text-shadow: 1px 1px 0 rgba(239,68,68,0.5), -1px -1px 0 rgba(249,115,22,0.5); }
+  100% { text-shadow: 0 0 0 transparent; }
+}
+
+@keyframes ember-drift {
+  0% { transform: translateY(100vh) translateX(0) scale(1) rotate(0deg); opacity: 0; }
+  20% { opacity: 0.8; }
+  80% { opacity: 0.6; }
+  100% { transform: translateY(-20vh) translateX(120px) scale(0.3) rotate(180deg); opacity: 0; }
+}
+
+.animate-fire-flicker {
+  animation: fire-flicker 3s infinite ease-in-out;
+}
+
+.animate-fire-pulse {
+  animation: fire-pulse 2s infinite ease-in-out;
+}
+
+.animate-alarm-flash {
+  animation: alarm-flash 1s infinite ease-in-out;
+}
+
+.animate-text-glitch {
+  animation: text-glitch 2s infinite steps(2);
+}
+
+/* Floating ash particles styles */
+.ember {
+  position: absolute;
+  pointer-events: none;
+  background: radial-gradient(circle, #f97316 0%, rgba(239,68,68,0) 70%);
+  border-radius: 50%;
+  animation: ember-drift 10s infinite linear;
+}
+
