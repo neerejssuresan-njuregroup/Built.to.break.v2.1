@@ -7,6 +7,7 @@ import React, { useState, useEffect } from "react";
 import { ShieldAlert, Flame, Compass, Users, MapPin, CheckCircle2 } from "lucide-react";
 import { calculateUrbanRisk } from "../data";
 import DelhiMap from "./DelhiMap";
+import { gamificationStore } from "../lib/GamificationStore";
 
 const PRESETS = [
   {
@@ -31,7 +32,7 @@ const PRESETS = [
   }
 ];
 
-export default function RiskSimulator() {
+function RiskSimulator() {
   // Synchronized Delhi area data list representing the 11 administrative districts
   const [areas, setAreas] = useState([
     { id: "delhi_north", name: "North Delhi", region: "NCT of Delhi", laneWidth: 5.0, buildingFloors: 3, commercialOverload: 2.0, exitsCount: 3, hazardScore: 48, hazardLevel: "Moderate" },
@@ -101,6 +102,12 @@ export default function RiskSimulator() {
       )
     );
   }, [inputs, selectedAreaId]);
+
+  useEffect(() => {
+    if (inputs.laneWidth !== 1.5 || inputs.buildingFloors !== 5 || inputs.commercialOverload !== 4.8 || inputs.exitsCount !== 1) {
+      gamificationStore.triggerMission("SIMULATOR");
+    }
+  }, [inputs]);
 
   const handleInputChange = (key, value) => {
     setInputs((prev) => ({
@@ -382,3 +389,5 @@ export default function RiskSimulator() {
     </div>
   );
 }
+
+export default React.memo(RiskSimulator);

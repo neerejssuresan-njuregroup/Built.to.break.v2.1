@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from "react";
+import CertificateVerificationModal from "./components/CertificateVerificationModal";
 import { 
   Flame, 
   MapPin, 
@@ -24,9 +25,14 @@ import {
   Volume2,
   VolumeX,
   Play,
-  ArrowLeft
+  ArrowLeft,
+  ShieldCheck,
+  FileCheck2
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { onAuthStateChanged } from "firebase/auth";
+import { auth, googleSignIn, googleSignOut } from "./lib/googleWorkspace";
+import { LogOut, User as UserIcon } from "lucide-react";
 import { STEPS } from "./data";
 import InteractiveCharts from "./components/InteractiveCharts";
 import RiskSimulator from "./components/RiskSimulator";
@@ -34,7 +40,10 @@ import IndiaComparison from "./components/IndiaComparison";
 import NbcAuditPanel from "./components/NbcAuditPanel";
 import EmberOverlay from "./components/EmberOverlay";
 import DocumentaryInside from "./components/DocumentaryInside";
+import TestYourKnowledge from "./components/TestYourKnowledge";
 import { audioEngine } from "./lib/AudioEngine";
+import GamificationHUD from "./components/GamificationHUD";
+import { gamificationStore } from "./lib/GamificationStore";
 
 import { 
   INDIAN_STATES_AND_UTS, 
@@ -64,6 +73,15 @@ export default function App() {
   const [showDocumentary, setShowDocumentary] = useState(false);
   const [isEnteringDocumentary, setIsEnteringDocumentary] = useState(false);
   const [showNbcPortal, setShowNbcPortal] = useState(false);
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const enterDocumentary = () => {
     setIsEnteringDocumentary(true);
@@ -192,15 +210,47 @@ export default function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Track progress of page scroll for a top progress bar
+  // Gamification triggers across site interactions
   useEffect(() => {
+    if (!showPreloader) {
+      gamificationStore.triggerMission("PRELOADER");
+    }
+  }, [showPreloader]);
+
+  useEffect(() => {
+    if (isAudioPlaying) {
+      gamificationStore.triggerMission("AUDIO");
+    }
+  }, [isAudioPlaying]);
+
+  useEffect(() => {
+    if (showDocumentary) {
+      gamificationStore.triggerMission("DOCUMENTARY");
+    }
+  }, [showDocumentary]);
+
+  useEffect(() => {
+    if (!scanning && (locationLevel !== "all_india" || selectedState !== "delhi")) {
+      gamificationStore.triggerMission("DIAGNOSTIC");
+    }
+  }, [locationLevel, selectedState, selectedDistrict, scanning]);
+
+  // Track progress of page scroll for a top progress bar (throttled with rAF for 60fps performance)
+  useEffect(() => {
+    let ticking = false;
     const handleScroll = () => {
-      const totalScroll = document.documentElement.scrollHeight - window.innerHeight;
-      if (totalScroll > 0) {
-        setScrollProgress((window.scrollY / totalScroll) * 100);
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          const totalScroll = document.documentElement.scrollHeight - window.innerHeight;
+          if (totalScroll > 0) {
+            setScrollProgress((window.scrollY / totalScroll) * 100);
+          }
+          ticking = false;
+        });
+        ticking = true;
       }
     };
-    window.addEventListener("scroll", handleScroll);
+    window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
@@ -359,8 +409,58 @@ export default function App() {
               BUILT_TO_BREAK
             </span>
           </div>
-          <div className="flex items-center gap-4 font-mono">
-            <span className="text-[10px] font-bold tracking-[0.1em] text-[#F97316] bg-[#F97316]/10 px-3 py-1 rounded-full border border-[#F97316]/20">
+          <div className="flex items-center gap-3 md:gap-4 font-mono">
+            <button
+              onClick={() => setShowVerificationModal(true)}
+              className="flex items-center gap-1.5 text-[10px] font-black tracking-[0.15em] text-emerald-400 bg-emerald-950/40 hover:bg-emerald-900/60 px-3.5 py-1.5 border border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.2)] transition-all cursor-pointer uppercase"
+              id="header-verify-cert-btn"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+              <span>VERIFY CERTIFICATE</span>
+            </button>
+
+            {currentUser ? (
+              <div className="flex items-center gap-2.5 bg-zinc-950/80 border border-zinc-900 px-3 py-1.5 shadow-[inset_0_0_8px_rgba(0,0,0,0.6)]">
+                <div className="w-5 h-5 rounded-full bg-red-950 border border-red-500/40 flex items-center justify-center overflow-hidden">
+                  {currentUser.photoURL ? (
+                    <img src={currentUser.photoURL} alt={currentUser.displayName || "User"} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    <UserIcon className="w-3 h-3 text-red-500" />
+                  )}
+                </div>
+                <div className="hidden md:block text-left leading-none max-w-[120px]">
+                  <div className="text-[9px] font-black text-zinc-100 truncate">
+                    {(currentUser.displayName || "Examiner").toUpperCase()}
+                  </div>
+                  <div className="text-[8px] text-zinc-500 truncate mt-0.5 font-mono">
+                    {currentUser.email}
+                  </div>
+                </div>
+                <button
+                  onClick={() => googleSignOut()}
+                  className="p-1 text-zinc-500 hover:text-red-500 transition-colors cursor-pointer"
+                  title="Sign Out"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={async () => {
+                  try {
+                    await googleSignIn();
+                  } catch (e) {
+                    console.error("Login failure:", e);
+                  }
+                }}
+                className="flex items-center gap-1.5 text-[10px] font-black tracking-[0.12em] text-[#EF4444] bg-red-950/15 hover:bg-red-950/30 px-3 py-1.5 border border-red-800/40 transition-all cursor-pointer uppercase hover:shadow-[0_0_10px_rgba(239,68,68,0.15)]"
+              >
+                <UserIcon className="w-3 h-3 text-[#EF4444]" />
+                <span>SIGN IN</span>
+              </button>
+            )}
+
+            <span className="hidden lg:inline-block text-[10px] font-bold tracking-[0.1em] text-[#F97316] bg-[#F97316]/10 px-3 py-1 rounded-full border border-[#F97316]/20">
               DELHI_RISK_STUDY_v2.0
             </span>
             <button
@@ -1060,6 +1160,53 @@ export default function App() {
         </div>
       </section>
 
+      {/* Test Your Knowledge Interactive Assessment Section */}
+      <section className="relative w-full bg-[#030304] border-t border-zinc-900/60 py-24 px-6 overflow-hidden" id="section-compliance-exam">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-12">
+            <span className="text-[10px] font-mono text-[#EF4444] uppercase tracking-[0.25em] font-black block mb-2">
+              [CIVIC COMPLIANCE VERIFICATION]
+            </span>
+            <h2 className="text-3xl md:text-5xl font-black text-zinc-100 uppercase tracking-tight font-display">
+              Test Your Knowledge
+            </h2>
+            <p className="text-zinc-500 text-xs md:text-sm mt-3 max-w-xl mx-auto leading-relaxed font-light">
+              Apply NBC Act rules to metropolitan building scenarios and evaluate spatial compliance. Gain public safety credentials authorized by the Built to Break initiative.
+            </p>
+          </div>
+          
+          <TestYourKnowledge />
+        </div>
+      </section>
+
+      {/* Public Certificate Verification Banner Section */}
+      <section className="relative w-full bg-[#07090b] border-t border-emerald-900/50 py-16 px-6 relative z-10" id="section-verify-portal-callout">
+        <div className="max-w-5xl mx-auto bg-black border border-emerald-500/40 p-8 md:p-10 shadow-[0_0_50px_rgba(16,185,129,0.1)] flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="space-y-2 text-left">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-emerald-400" />
+              <span className="text-xs font-mono font-black uppercase tracking-[0.25em] text-emerald-400">
+                GOOGLE SHEETS & DRIVE AUTHENTICATED REGISTRY
+              </span>
+            </div>
+            <h3 className="text-2xl md:text-3xl font-black text-zinc-100 uppercase tracking-tight font-display">
+              Public Certificate Verification Portal
+            </h3>
+            <p className="text-zinc-400 text-xs md:text-sm font-light max-w-2xl leading-relaxed">
+              Verify any issued "Built to Break" compliance certificate instantly. All certificate records and backup documents are cryptographically tracked in our Google Sheets & Drive database.
+            </p>
+          </div>
+
+          <button
+            onClick={() => setShowVerificationModal(true)}
+            className="w-full md:w-auto px-8 py-4 bg-emerald-500 hover:bg-emerald-400 text-black font-mono text-xs font-black uppercase tracking-widest transition-all duration-300 shadow-[0_0_25px_rgba(16,185,129,0.4)] cursor-pointer shrink-0 flex items-center justify-center gap-2"
+          >
+            <ShieldCheck className="w-4 h-4 text-black" />
+            <span>OPEN VERIFICATION PORTAL</span>
+          </button>
+        </div>
+      </section>
+
       {/* Styled Footer */}
       <footer className="bg-black border-t border-red-950/30 py-16 px-6 relative z-10">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
@@ -1071,6 +1218,16 @@ export default function App() {
           </div>
         </div>
       </footer>
+
+      {/* Certificate Verification Portal Modal */}
+      <AnimatePresence>
+        {showVerificationModal && (
+          <CertificateVerificationModal
+            isOpen={showVerificationModal}
+            onClose={() => setShowVerificationModal(false)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* High-performance canvas-based Ember Overlay */}
       <EmberOverlay active={isCriticalNarrowingActive} />
@@ -1094,6 +1251,9 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+
+      {/* Floating Gamification / Forensic XP HUD */}
+      <GamificationHUD />
 
     </div>
   );

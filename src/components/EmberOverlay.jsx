@@ -5,7 +5,7 @@
 
 import React, { useEffect, useRef } from "react";
 
-export default function EmberOverlay({ active }) {
+function EmberOverlay({ active }) {
   const canvasRef = useRef(null);
   const isPastMetricsRef = useRef(false);
   const lastScrollYRef = useRef(0);
@@ -994,14 +994,24 @@ export default function EmberOverlay({ active }) {
         ctx.fillRect(0, canvas.height - 200, canvas.width, 200);
       }
 
-      animationId = requestAnimationFrame(animate);
+      if (!document.hidden) {
+        animationId = requestAnimationFrame(animate);
+      }
     };
 
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        animationId = requestAnimationFrame(animate);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     animate();
 
     return () => {
       window.removeEventListener("resize", resizeCanvas);
       window.removeEventListener("structural-rumble", handleRumble);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       cancelAnimationFrame(animationId);
     };
   }, [active]);
@@ -1017,3 +1027,5 @@ export default function EmberOverlay({ active }) {
     />
   );
 }
+
+export default React.memo(EmberOverlay);

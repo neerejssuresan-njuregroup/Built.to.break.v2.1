@@ -69,7 +69,7 @@ const COMPARISON_DATA = [
   },
 ];
 
-export default function IndiaComparison() {
+function IndiaComparison() {
   const [activeCity1, setActiveCity1] = useState("Delhi (Hauz Rani)");
   const [activeCity2, setActiveCity2] = useState("Mumbai (Kalbadevi)");
 
@@ -273,3 +273,5 @@ export default function IndiaComparison() {
     </div>
   );
 }
+
+export default React.memo(IndiaComparison);

@@ -38,7 +38,7 @@ const formatLabel = (label, width) => {
   }
 };
 
-export default function InteractiveCharts({ activeStep, stableWidth, stableHeight }) {
+function InteractiveCharts({ activeStep, stableWidth, stableHeight }) {
   const containerRef = useRef(null);
   const chartWrapperRef = useRef(null);
   const svgRef = useRef(null);
@@ -826,3 +826,5 @@ export default function InteractiveCharts({ activeStep, stableWidth, stableHeigh
     </div>
   );
 }
+
+export default React.memo(InteractiveCharts);

@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { gamificationStore } from "../lib/GamificationStore";
 import {
   ResponsiveContainer,
   LineChart,
@@ -140,8 +141,14 @@ const NBC_AUDIT_SECTIONS = [
   }
 ];
 
-export default function NbcAuditPortal({ isOpen, onClose }) {
+function NbcAuditPanel({ isOpen, onClose }) {
   const [selectedSection, setSelectedSection] = useState(NBC_AUDIT_SECTIONS[0]);
+
+  useEffect(() => {
+    if (isOpen) {
+      gamificationStore.triggerMission("NBC_PORTAL");
+    }
+  }, [isOpen]);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState("breach"); // "breach" | "benefit" | "remedy"
 
@@ -1010,3 +1017,5 @@ export default function NbcAuditPortal({ isOpen, onClose }) {
     </AnimatePresence>
   );
 }
+
+export default React.memo(NbcAuditPanel);

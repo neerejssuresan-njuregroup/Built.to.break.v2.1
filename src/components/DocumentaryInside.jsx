@@ -256,7 +256,7 @@ const EVIDENCE_DATABASE = {
   }
 };
 
-export default function DocumentaryInside({ onClose, audioEngine }) {
+function DocumentaryInside({ onClose, audioEngine }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const [scrollPosition, setScrollPosition] = useState(0);
@@ -1977,3 +1977,5 @@ export default function DocumentaryInside({ onClose, audioEngine }) {
     </motion.div>
   );
 }
+
+export default React.memo(DocumentaryInside);

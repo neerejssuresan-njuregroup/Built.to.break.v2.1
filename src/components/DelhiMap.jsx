@@ -7,7 +7,7 @@ import React, { useState } from "react";
 import { motion } from "motion/react";
 import { Compass, Layers, Maximize2, ShieldAlert } from "lucide-react";
 
-export default function DelhiMap({ areas, selectedAreaId, onSelectArea }) {
+function DelhiMap({ areas, selectedAreaId, onSelectArea }) {
   const [viewMode, setViewMode] = useState("3d");
 
   // Helper to get color code based on requirements hazard score for fire-based theme
@@ -535,3 +535,5 @@ export default function DelhiMap({ areas, selectedAreaId, onSelectArea }) {
     </div>
   );
 }
+
+export default React.memo(DelhiMap);
