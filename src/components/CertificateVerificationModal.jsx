@@ -21,7 +21,9 @@ import {
   User, 
   Calendar, 
   MapPin, 
-  Cloud 
+  Cloud,
+  Lock,
+  FileCheck
 } from "lucide-react";
 import { 
   getAccessToken, 
@@ -252,7 +254,7 @@ function CertificateVerificationModal({ isOpen, onClose, initialCertCode = "" })
                       </div>
 
                       {/* Certificate Recipient Details Grid */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 bg-black p-4 border border-zinc-900">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 bg-black p-4 border border-zinc-900">
                         <div>
                           <span className="text-[9px] font-mono text-zinc-500 uppercase block font-bold">RECIPIENT NAME</span>
                           <span className="text-sm font-black text-zinc-100 uppercase tracking-wide flex items-center gap-1.5 mt-1">
@@ -266,6 +268,24 @@ function CertificateVerificationModal({ isOpen, onClose, initialCertCode = "" })
                           <span className="text-sm font-black text-zinc-100 uppercase tracking-wide flex items-center gap-1.5 mt-1">
                             <MapPin className="w-4 h-4 text-[#F97316]" />
                             {searchResult.userState || "Delhi NCR"}
+                          </span>
+                        </div>
+
+                        <div>
+                          <span className="text-[9px] font-mono text-zinc-500 uppercase block font-bold">VERIFIED ID TYPE</span>
+                          <span className="text-sm font-black text-amber-400 uppercase tracking-wide flex items-center gap-1.5 mt-1 font-mono">
+                            <ShieldCheck className="w-4 h-4 text-amber-400" />
+                            {searchResult.idType 
+                              ? (searchResult.idType.toLowerCase().includes("aadhaar") ? "AADHAAR CARD" : searchResult.idType.toLowerCase().includes("pan") ? "PAN CARD" : searchResult.idType.toUpperCase())
+                              : "GOVT ID (VERIFIED)"}
+                          </span>
+                        </div>
+
+                        <div>
+                          <span className="text-[9px] font-mono text-zinc-500 uppercase block font-bold">ID CREDENTIAL REF</span>
+                          <span className="text-xs font-black text-zinc-300 tracking-wide flex items-center gap-1.5 mt-1 font-mono">
+                            <Lock className="w-3.5 h-3.5 text-zinc-500" />
+                            {searchResult.idNumber || "VERIFIED"}
                           </span>
                         </div>
 
@@ -331,13 +351,25 @@ function CertificateVerificationModal({ isOpen, onClose, initialCertCode = "" })
                               className="flex items-center gap-1.5 text-sky-400 hover:underline font-bold"
                             >
                               <FolderCheck className="w-4 h-4 text-sky-400" />
-                              View Document on Google Drive ↗
+                              View Certificate on Google Drive ↗
                             </a>
                           ) : (
                             <span className="flex items-center gap-1.5 text-zinc-500">
                               <Cloud className="w-4 h-4 text-zinc-500" />
                               Google Drive Sync: ACTIVE
                             </span>
+                          )}
+
+                          {searchResult.driveIdViewUrl && searchResult.driveIdViewUrl !== "N/A" && (
+                            <a
+                              href={searchResult.driveIdViewUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex items-center gap-1.5 text-amber-400 hover:underline font-bold"
+                            >
+                              <FileCheck className="w-4 h-4 text-amber-400" />
+                              View Verified ID Scan on Google Drive ↗
+                            </a>
                           )}
                         </div>
 

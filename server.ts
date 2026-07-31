@@ -1,15 +1,84 @@
 import express from "express";
 import path from "path";
+import crypto from "crypto";
+import { Server as SocketIOServer } from "socket.io";
 import { createServer as createViteServer } from "vite";
 import { db } from "./src/db/index.ts";
-import { users, certificates, questions } from "./src/db/schema.ts";
+import { users, certificates, questions, admins, ongoingSessions } from "./src/db/schema.ts";
 import { eq, sql } from "drizzle-orm";
 import { adminAuth } from "./src/lib/firebase-admin.ts";
 import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
+import { FALLBACK_QUESTIONS } from "./src/questionsData.js";
+
+// Hashing algorithms for ID & Passwords (case-sensitive)
+function hashAdminId(adminId: string): string {
+  const salt = "NBC_ADMIN_ID_SALT_2026";
+  return crypto.createHash("sha256").update(adminId + salt).digest("hex");
+}
+
+function hashPassword(password: string): string {
+  const salt = "NBC_ADMIN_PASS_SALT_2026";
+  return crypto.createHash("sha256").update(password + salt).digest("hex");
+}
+
+// Admin Sessions
+const adminSessions = new Map<string, { username: string; expiresAt: number }>();
+
+function requireAdmin(req: any, res: any, next: any) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return res.status(401).json({ error: "Unauthorized. Admin session token is missing." });
+  }
+  const token = authHeader.split("Bearer ")[1];
+  const session = adminSessions.get(token);
+  if (!session || session.expiresAt < Date.now()) {
+    if (session) adminSessions.delete(token); // clean up expired
+    return res.status(401).json({ error: "Session expired or invalid. Please log in again." });
+  }
+  req.admin = session;
+  next();
+}
+
+let globalSettings = {
+  hideGamification: false
+};
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
+  
+  app.use(express.json({ limit: "50mb" }));
+
+  app.get("/api/settings", (req, res) => {
+    res.json(globalSettings);
+  });
+
+  app.post("/api/admin/settings", requireAdmin, (req, res) => {
+    if (typeof req.body.hideGamification === "boolean") {
+      globalSettings.hideGamification = req.body.hideGamification;
+    }
+    res.json(globalSettings);
+  });
+
+  // Auto-seed admin user if missing
+  try {
+    const adminIdRaw = "Group30ExamAdmin";
+    const adminPassRaw = "NBCExamAdmin0191@#!";
+    
+    const hashedId = hashAdminId(adminIdRaw);
+    const hashedPassword = hashPassword(adminPassRaw);
+    
+    const existing = await db.select().from(admins).where(eq(admins.username, hashedId)).limit(1);
+    if (existing.length === 0) {
+      await db.insert(admins).values({
+        username: hashedId,
+        passwordHash: hashedPassword
+      });
+      console.log("[DB] Admin user successfully seeded.");
+    }
+  } catch (err: any) {
+    console.error("[DB] Failed to seed admin user:", err);
+  }
 
   // Body parsers with increased limit for base64 photo uploads
   app.use(express.json({ limit: "20mb" }));
@@ -20,13 +89,406 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // API Route: Admin Login
+  app.post("/api/admin/login", async (req, res) => {
+    try {
+      const { username, password } = req.body;
+      if (!username || !password) {
+        return res.status(400).json({ error: "Username and password are required." });
+      }
+
+      const hashedUsername = hashAdminId(username);
+      const hashedPassword = hashPassword(password);
+
+      const match = await db.select()
+        .from(admins)
+        .where(eq(admins.username, hashedUsername))
+        .limit(1);
+
+      if (match.length === 0 || match[0].passwordHash !== hashedPassword) {
+        return res.status(401).json({ error: "Invalid admin credentials. Access Denied." });
+      }
+
+      // Valid admin login! Generate a session token
+      const token = crypto.randomBytes(32).toString("hex");
+      const expiresAt = Date.now() + 2 * 60 * 60 * 1000; // 2 hours
+      adminSessions.set(token, { username, expiresAt });
+
+      res.json({ success: true, token, username });
+    } catch (error: any) {
+      console.error("Admin login error:", error);
+      res.status(500).json({ error: "Internal server error during admin login" });
+    }
+  });
+
+  // API Route: Verify Admin Token
+  app.get("/api/admin/verify", (req, res) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    const token = authHeader.split("Bearer ")[1];
+    const session = adminSessions.get(token);
+    if (!session || session.expiresAt < Date.now()) {
+      return res.status(401).json({ error: "Expired" });
+    }
+    res.json({ valid: true, username: session.username });
+  });
+
+  // API Route: Get All Questions (Admin)
+  app.get("/api/admin/questions", requireAdmin, async (req, res) => {
+    try {
+      const allQ = await db.select().from(questions);
+      res.json(allQ);
+    } catch (error: any) {
+      console.error("Admin fetch questions error:", error);
+      res.status(500).json({ error: "Failed to fetch questions from database" });
+    }
+  });
+
+  // API Route: Add Question (Admin)
+  app.post("/api/admin/questions", requireAdmin, async (req, res) => {
+    try {
+      const q = req.body;
+      if (!q.title || !q.type || !q.description || !q.options || !q.correctId || !q.nbcClauses || !q.bnsSection) {
+        return res.status(400).json({ error: "Missing required fields for creating a question." });
+      }
+
+      const questionId = q.questionId || `custom_q_${Date.now()}`;
+      const result = await db.insert(questions).values({
+        questionId,
+        title: q.title,
+        type: q.type,
+        location: q.location || "Custom Location",
+        description: q.description,
+        difficulty: q.difficulty || "MEDIUM",
+        points: parseInt(q.points, 10) || 10,
+        options: q.options,
+        correctId: q.correctId,
+        nbcClauses: q.nbcClauses,
+        bnsSection: q.bnsSection,
+        hazardLevel: q.hazardLevel || "HIGH",
+        fact: q.fact || "",
+      }).returning();
+
+      res.json({ success: true, question: result[0] });
+    } catch (error: any) {
+      console.error("Admin add question error:", error);
+      res.status(500).json({ error: "Failed to add question to database", details: error.message });
+    }
+  });
+
+  // API Route: Update Question (Admin)
+  app.put("/api/admin/questions/:id", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const q = req.body;
+
+      const result = await db.update(questions)
+        .set({
+          title: q.title,
+          type: q.type,
+          location: q.location,
+          description: q.description,
+          difficulty: q.difficulty,
+          points: parseInt(q.points, 10) || 10,
+          options: q.options,
+          correctId: q.correctId,
+          nbcClauses: q.nbcClauses,
+          bnsSection: q.bnsSection,
+          hazardLevel: q.hazardLevel,
+          fact: q.fact,
+        })
+        .where(eq(questions.id, parseInt(id, 10)))
+        .returning();
+
+      if (result.length === 0) {
+        return res.status(404).json({ error: "Question not found" });
+      }
+
+      res.json({ success: true, question: result[0] });
+    } catch (error: any) {
+      console.error("Admin update question error:", error);
+      res.status(500).json({ error: "Failed to update question", details: error.message });
+    }
+  });
+
+  // API Route: Delete Question (Admin)
+  app.delete("/api/admin/questions/:id", requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const result = await db.delete(questions)
+        .where(eq(questions.id, parseInt(id, 10)))
+        .returning();
+
+      if (result.length === 0) {
+        return res.status(404).json({ error: "Question not found" });
+      }
+
+      res.json({ success: true, deleted: result[0] });
+    } catch (error: any) {
+      console.error("Admin delete question error:", error);
+      res.status(500).json({ error: "Failed to delete question", details: error.message });
+    }
+  });
+
+  // API Route: Search Certificates (Admin)
+  app.get("/api/admin/certificates/search", requireAdmin, async (req, res) => {
+    try {
+      const q = req.query.q as string || "";
+      const searchVal = `%${q.trim()}%`;
+
+      const results = await db.select()
+        .from(certificates)
+        .where(
+          sql`LOWER(${certificates.userName}) LIKE LOWER(${searchVal}) OR LOWER(${certificates.userState}) LIKE LOWER(${searchVal}) OR LOWER(${certificates.certCode}) LIKE LOWER(${searchVal})`
+        );
+
+      res.json(results);
+    } catch (error: any) {
+      console.error("Admin certificates search error:", error);
+      res.status(500).json({ error: "Search failed", details: error.message });
+    }
+  });
+
+  // API Route: Candidate Exam Session Sync (Client to Server)
+  app.post("/api/sessions/sync", async (req, res) => {
+    try {
+      const {
+        sessionCode,
+        userName,
+        userState,
+        status,
+        proctorLogs,
+        flags,
+        currentQuestionIndex,
+        scorePercent,
+        userPhoto
+      } = req.body;
+
+      if (!sessionCode || !userName) {
+        return res.status(400).json({ error: "Missing required session fields." });
+      }
+
+      const existing = await db.select().from(ongoingSessions).where(eq(ongoingSessions.sessionCode, sessionCode)).limit(1);
+
+      let updatedRecord;
+      if (existing.length === 0) {
+        const inserted = await db.insert(ongoingSessions).values({
+          sessionCode,
+          userName,
+          userState: userState || "Delhi NCR",
+          status: status || "ongoing",
+          proctorLogs: proctorLogs || [],
+          flags: flags || 0,
+          currentQuestionIndex: currentQuestionIndex || 0,
+          scorePercent: scorePercent || 0,
+          userPhoto: userPhoto || null,
+          updatedAt: new Date(),
+        }).returning();
+        updatedRecord = inserted[0];
+      } else {
+        const serverStatus = existing[0].status;
+        const serverFlags = existing[0].flags ?? 0;
+        const serverLogs = existing[0].proctorLogs as any[] || [];
+
+        const clientLogs = proctorLogs || [];
+        const manualServerLogs = serverLogs.filter((log: any) => log.type === "MANUAL" || log.action === "FLAG" || log.action === "UNFLAG");
+        
+        const mergedLogs = [...clientLogs];
+        for (const mLog of manualServerLogs) {
+          const alreadyExists = mergedLogs.some((l: any) => l.message === mLog.message && l.timestamp === mLog.timestamp);
+          if (!alreadyExists) {
+            mergedLogs.push(mLog);
+          }
+        }
+        
+        const finalStatus = (serverStatus === "disqualified" && status !== "completed") ? "disqualified" : status;
+        const finalFlags = Math.max(serverFlags, flags || 0);
+
+        const updated = await db.update(ongoingSessions)
+          .set({
+            userName,
+            userState: userState || "Delhi NCR",
+            status: finalStatus,
+            proctorLogs: mergedLogs,
+            flags: finalFlags,
+            currentQuestionIndex: currentQuestionIndex ?? existing[0].currentQuestionIndex,
+            scorePercent: scorePercent ?? existing[0].scorePercent,
+            userPhoto: userPhoto || existing[0].userPhoto,
+            updatedAt: new Date(),
+          })
+          .where(eq(ongoingSessions.sessionCode, sessionCode))
+          .returning();
+        updatedRecord = updated[0];
+      }
+
+      res.json({ success: true, session: updatedRecord });
+    } catch (error: any) {
+      console.error("Session sync error:", error);
+      res.status(500).json({ error: "Failed to sync session", details: error.message });
+    }
+  });
+
+  // API Route: Candidate Session Status Polling
+  app.get("/api/sessions/status/:sessionCode", async (req, res) => {
+    try {
+      const { sessionCode } = req.params;
+      const session = await db.select().from(ongoingSessions).where(eq(ongoingSessions.sessionCode, sessionCode)).limit(1);
+      if (session.length === 0) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+      res.json({ ...session[0], hideGamification: globalSettings.hideGamification });
+    } catch (error: any) {
+      console.error("Get session status error:", error);
+      res.status(500).json({ error: "Server error retrieving status" });
+    }
+  });
+
+  // API Route: Get All Live/Recent Sessions (Admin)
+  app.get("/api/admin/sessions", requireAdmin, async (req, res) => {
+    try {
+      const sessionsList = await db.select().from(ongoingSessions).orderBy(sql`updated_at desc`);
+      res.json(sessionsList);
+    } catch (error: any) {
+      console.error("Admin fetch live sessions error:", error);
+      res.status(500).json({ error: "Failed to fetch live sessions" });
+    }
+  });
+
+  // API Route: Manually Flag a Session (Admin)
+  app.post("/api/admin/sessions/:sessionCode/flag", requireAdmin, async (req, res) => {
+    try {
+      const { sessionCode } = req.params;
+      const { comment } = req.body;
+
+      const existing = await db.select().from(ongoingSessions).where(eq(ongoingSessions.sessionCode, sessionCode)).limit(1);
+      if (existing.length === 0) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+
+      const timestamp = new Date().toLocaleTimeString();
+      const newLog = {
+        timestamp,
+        type: "MANUAL",
+        message: `[ADMIN MANUAL FLAG] Added by Proctor. Comment: ${comment}`,
+        action: "FLAG",
+        comment
+      };
+
+      const updatedLogs = [newLog, ...(existing[0].proctorLogs as any[] || [])];
+      const newFlags = (existing[0].flags ?? 0) + 1;
+      const newStatus = newFlags >= 10 ? "disqualified" : existing[0].status;
+
+      await db.update(ongoingSessions)
+        .set({
+          flags: newFlags,
+          status: newStatus,
+          proctorLogs: updatedLogs,
+          updatedAt: new Date()
+        })
+        .where(eq(ongoingSessions.sessionCode, sessionCode));
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Admin flag session error:", error);
+      res.status(500).json({ error: "Failed to manually flag session", details: error.message });
+    }
+  });
+
+  // API Route: Revoke a Flag from a Session (Admin)
+  app.post("/api/admin/sessions/:sessionCode/revoke", requireAdmin, async (req, res) => {
+    try {
+      const { sessionCode } = req.params;
+      const { comment } = req.body;
+
+      const existing = await db.select().from(ongoingSessions).where(eq(ongoingSessions.sessionCode, sessionCode)).limit(1);
+      if (existing.length === 0) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+
+      const timestamp = new Date().toLocaleTimeString();
+      const newLog = {
+        timestamp,
+        type: "MANUAL",
+        message: `[ADMIN REVOKE FLAG] Proctor revoked a flag warning. Comment: ${comment}`,
+        action: "UNFLAG",
+        comment
+      };
+
+      const updatedLogs = [newLog, ...(existing[0].proctorLogs as any[] || [])];
+      const newFlags = Math.max(0, (existing[0].flags ?? 0) - 1);
+      const newStatus = (newFlags < 10 && existing[0].status === "disqualified") ? "ongoing" : existing[0].status;
+
+      await db.update(ongoingSessions)
+        .set({
+          flags: newFlags,
+          status: newStatus,
+          proctorLogs: updatedLogs,
+          updatedAt: new Date()
+        })
+        .where(eq(ongoingSessions.sessionCode, sessionCode));
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Admin revoke flag error:", error);
+      res.status(500).json({ error: "Failed to revoke flag", details: error.message });
+    }
+  });
+
+  // API Route: Terminate a Session (Admin)
+  app.post("/api/admin/sessions/:sessionCode/terminate", requireAdmin, async (req, res) => {
+    try {
+      const { sessionCode } = req.params;
+      const { comment } = req.body;
+
+      const existing = await db.select().from(ongoingSessions).where(eq(ongoingSessions.sessionCode, sessionCode)).limit(1);
+      if (existing.length === 0) {
+        return res.status(404).json({ error: "Session not found" });
+      }
+
+      const timestamp = new Date().toLocaleTimeString();
+      const newLog = {
+        timestamp,
+        type: "MANUAL",
+        message: `[ADMIN TERMINATED EXAM] Proctor manually ended this exam session. Comment: ${comment}`,
+        action: "TERMINATE",
+        comment
+      };
+
+      const updatedLogs = [newLog, ...(existing[0].proctorLogs as any[] || [])];
+
+      await db.update(ongoingSessions)
+        .set({
+          status: "disqualified",
+          proctorLogs: updatedLogs,
+          updatedAt: new Date()
+        })
+        .where(eq(ongoingSessions.sessionCode, sessionCode));
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Admin terminate session error:", error);
+      res.status(500).json({ error: "Failed to terminate session", details: error.message });
+    }
+  });
+
   // API Route: Get 20 Random Questions from Database
   app.get("/api/questions", async (req, res) => {
     try {
-      const randomQuestions = await db.select()
-        .from(questions)
-        .orderBy(sql`random()`)
-        .limit(20);
+      let randomQuestions: any[] = [];
+      try {
+        randomQuestions = await db.select()
+          .from(questions)
+          .orderBy(sql`random()`)
+          .limit(20);
+      } catch (dbError: any) {
+        console.warn("[DB] Failed to query questions table, serving fallback question bank:", dbError?.message);
+      }
+
+      if (!randomQuestions || randomQuestions.length === 0) {
+        return res.json(FALLBACK_QUESTIONS);
+      }
 
       const mapped = randomQuestions.map((q) => ({
         id: q.questionId, // map questionId to id for frontend compatibility
@@ -47,7 +509,7 @@ async function startServer() {
       res.json(mapped);
     } catch (error: any) {
       console.error("Database fetch questions error:", error);
-      res.status(500).json({ error: "Failed to fetch questions from database", details: error.message });
+      res.json(FALLBACK_QUESTIONS);
     }
   });
 
@@ -265,8 +727,24 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
+  const httpServer = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
+  });
+
+  const io = new SocketIOServer(httpServer, {
+    cors: { origin: "*" }
+  });
+
+  io.on("connection", (socket) => {
+    socket.on("join-session", (sessionCode) => {
+      socket.join(sessionCode);
+    });
+
+    socket.on("video-frame", (data) => {
+      if (data && data.sessionCode) {
+        socket.to(data.sessionCode).emit("receive-video-frame", data);
+      }
+    });
   });
 }
 

@@ -42,6 +42,7 @@ import EmberOverlay from "./components/EmberOverlay";
 import DocumentaryInside from "./components/DocumentaryInside";
 import TestYourKnowledge from "./components/TestYourKnowledge";
 import ErrorScreen from "./components/ErrorScreen";
+import AdminDashboard from "./components/AdminDashboard";
 import { audioEngine } from "./lib/AudioEngine";
 import GamificationHUD from "./components/GamificationHUD";
 import { gamificationStore } from "./lib/GamificationStore";
@@ -75,6 +76,7 @@ export default function App() {
   const [isEnteringDocumentary, setIsEnteringDocumentary] = useState(false);
   const [showNbcPortal, setShowNbcPortal] = useState(false);
   const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [showAdminDashboard, setShowAdminDashboard] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
 
   // 404, 403, 503 error states and URL listener
@@ -84,8 +86,11 @@ export default function App() {
   useEffect(() => {
     const checkPath = () => {
       const path = window.location.pathname;
-      if (path !== "/" && path !== "" && !path.includes("index.html")) {
-        if (path === "/admin" || path === "/restricted" || path === "/dossier") {
+      if (path === "/admin") {
+        setShowAdminDashboard(true);
+        setErrorState(null);
+      } else if (path !== "/" && path !== "" && !path.includes("index.html")) {
+        if (path === "/restricted" || path === "/dossier") {
           setErrorState("403");
           setErrorMessage("Biometric validation failed. Path " + path + " is restricted to regional municipal fire marshals.");
         } else if (path === "/error" || path === "/down" || path === "/offline") {
@@ -97,6 +102,7 @@ export default function App() {
         }
       } else {
         setErrorState(null);
+        setShowAdminDashboard(false);
       }
     };
 
@@ -1265,8 +1271,18 @@ export default function App() {
           <div className="brand font-black italic text-2xl tracking-tighter text-zinc-100 animate-text-glitch">
             BUILT_TO_BREAK_v2.1
           </div>
-          <div className="flex flex-wrap items-center gap-3 text-zinc-600 font-mono text-[10px] uppercase tracking-widest font-black">
+          <div className="flex flex-wrap items-center gap-4 text-zinc-600 font-mono text-[10px] uppercase tracking-widest font-black">
             <span>STORY SYSTEM DESIGNED BY SYSTEMS AUDIT</span>
+            <span>•</span>
+            <button
+              onClick={() => {
+                window.history.pushState({}, "", "/admin");
+                setShowAdminDashboard(true);
+              }}
+              className="text-zinc-500 hover:text-red-500 transition-colors uppercase font-mono tracking-widest text-[10px] font-black cursor-pointer bg-transparent border-none outline-none"
+            >
+              [SECURE ADMIN CONSOLE]
+            </button>
           </div>
         </div>
       </footer>
@@ -1277,6 +1293,18 @@ export default function App() {
           <CertificateVerificationModal
             isOpen={showVerificationModal}
             onClose={() => setShowVerificationModal(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Fullscreen Admin Dashboard Overlay */}
+      <AnimatePresence>
+        {showAdminDashboard && (
+          <AdminDashboard
+            onClose={() => {
+              setShowAdminDashboard(false);
+              window.history.pushState({}, "", "/");
+            }}
           />
         )}
       </AnimatePresence>

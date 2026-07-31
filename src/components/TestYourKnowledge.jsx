@@ -49,12 +49,14 @@ import {
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { gamificationStore } from "../lib/GamificationStore";
+import { io } from "socket.io-client";
 import { saveLocalCertificate, saveCertificateToDb, getAccessToken, uploadIdToDrive } from "../lib/googleWorkspace";
 import { 
   downloadCertificatePdf, 
   downloadCertificatePng, 
   printCertificateImage 
 } from "../utils/certificateGenerator";
+import { FALLBACK_QUESTIONS } from "../questionsData";
 
 const INDIAN_STATES = [
   "Andaman and Nicobar Islands",
@@ -96,6 +98,9 @@ const INDIAN_STATES = [
 ];
 
 function TestYourKnowledge() {
+  // Generate dynamic Certificate Code based on score and time
+  const [certCode] = useState(() => `DFS-AUDIT-${Math.floor(100000 + Math.random() * 900000)}`);
+
   const [activeScenarioIdx, setActiveScenarioIdx] = useState(0);
   const [selectedOption, setSelectedOption] = useState(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -103,6 +108,13 @@ function TestYourKnowledge() {
   const [hasStarted, setHasStarted] = useState(false);
   const [isLoadingQuestions, setIsLoadingQuestions] = useState(false);
   const [questionsError, setQuestionsError] = useState(null);
+
+  // Game states
+  const [quizQuestions, setQuizQuestions] = useState([]); // 20 randomized questions
+  const [attemptedAnswers, setAttemptedAnswers] = useState({}); // { index: { selectedId, isCorrect, pointsEarned } }
+  const [earnedPoints, setEarnedPoints] = useState(0);
+  const [totalPossiblePoints, setTotalPossiblePoints] = useState(0);
+  const [categoryBreakdown, setCategoryBreakdown] = useState({}); // Tracks correct/wrong by type
   
   // User identity details
   const [userName, setUserName] = useState("");
@@ -161,15 +173,18 @@ function TestYourKnowledge() {
     reader.readAsDataURL(file);
   };
 
-  const autofillDemoID = () => {
-    setUserName("Arjun Sharma");
-    setUserState("Delhi NCR");
-    setIdType("aadhaar");
-    handleIdNumberChange("987654321012", "aadhaar");
-    setIdPhoto("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='100' viewBox='0 0 160 100'><rect width='100%' height='100%' fill='%2312131a'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='%2310b981' font-size='10' font-family='monospace'>DEMO AADHAAR ID</text></svg>");
-    setIdPhotoName("demo_aadhaar_card.png");
-    logProctor("[INFO] Demo examiner ID pre-filled for testing.");
-  };
+  // Auto-fill demo credentials when user enters "Test User"
+  useEffect(() => {
+    if (userName.trim().toLowerCase().includes("test user")) {
+      if (!userState) setUserState("Delhi NCR");
+      if (!idType) setIdType("aadhaar");
+      if (!idNumber) setIdNumber("987654321012");
+      if (!idPhoto) {
+        setIdPhoto("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='100' viewBox='0 0 160 100'><rect width='100%' height='100%' fill='%2312131a'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='%2310b981' font-size='10' font-family='monospace'>DEMO AADHAAR ID (TEST USER)</text></svg>");
+        setIdPhotoName("demo_aadhaar_card.png");
+      }
+    }
+  }, [userName, userState, idType, idNumber, idPhoto]);
 
   const typeLabel = (t) => t === "aadhaar" ? "Aadhaar Card" : "PAN Card";
   
@@ -219,6 +234,7 @@ function TestYourKnowledge() {
   const expandedVideoRef = React.useRef(null);
   const canvasRef = React.useRef(null);
   const [malpracticeCount, setMalpracticeCount] = useState(0);
+  const [hideGamification, setHideGamification] = useState(false);
   const [isTerminated, setIsTerminated] = useState(false);
   const [malpracticeAlert, setMalpracticeAlert] = useState(null);
   const [proctorLogs, setProctorLogs] = useState(["[SYSTEM INITIALIZED] Camera proctor calibration ready."]);
@@ -291,14 +307,15 @@ function TestYourKnowledge() {
     if (videoRef.current) {
       const video = videoRef.current;
       const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth || 640;
-      canvas.height = video.videoHeight || 480;
+      // Use smaller resolution for performance and dashboard display
+      canvas.width = 320;
+      canvas.height = 240;
       const ctx = canvas.getContext("2d");
       if (ctx) {
         if (video.readyState >= video.HAVE_CURRENT_DATA) {
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
           try {
-            return canvas.toDataURL("image/png");
+            return canvas.toDataURL("image/jpeg", 0.6);
           } catch (e) {
             console.error("Failed to extract canvas base64 image:", e);
           }
@@ -559,23 +576,136 @@ function TestYourKnowledge() {
     }
   }, [malpracticeAlert]);
 
-  // Game states
-  const [quizQuestions, setQuizQuestions] = useState([]); // 20 randomized questions
-  const [attemptedAnswers, setAttemptedAnswers] = useState({}); // { index: { selectedId, isCorrect, pointsEarned } }
-  const [earnedPoints, setEarnedPoints] = useState(0);
-  const [totalPossiblePoints, setTotalPossiblePoints] = useState(0);
-  const [categoryBreakdown, setCategoryBreakdown] = useState({}); // Tracks correct/wrong by type
+  // Real-time video streaming to Admin
+  useEffect(() => {
+    if (!hasStarted || showSummary || isTerminated || !certCode) return;
+    
+    // Connect socket
+    const socket = io();
+    socket.emit("join-session", certCode);
 
-  // Fetch 20 random questions dynamically from the PostgreSQL database
+    const streamInterval = setInterval(() => {
+      const frame = capturePhoto();
+      if (frame) {
+        socket.emit("video-frame", { sessionCode: certCode, frame });
+      }
+    }, 200); // 5 FPS
+
+    return () => {
+      clearInterval(streamInterval);
+      socket.disconnect();
+    };
+  }, [hasStarted, showSummary, isTerminated, certCode]);
+
+  const syncSessionWithServer = async (overrideStatus, overrideLogs, overrideFlags) => {
+    try {
+      const currentStatus = overrideStatus || (isTerminated ? "disqualified" : showSummary ? "completed" : "ongoing");
+      const currentLogs = overrideLogs || proctorLogs;
+      const currentFlags = overrideFlags !== undefined ? overrideFlags : malpracticeCount;
+      const currentScorePercent = Math.round((earnedPoints / (totalPossiblePoints || 1)) * 100);
+
+      const res = await fetch("/api/sessions/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionCode: certCode,
+          userName: userName || "Test User",
+          userState: userState || "Delhi NCR",
+          status: currentStatus,
+          proctorLogs: currentLogs,
+          flags: currentFlags,
+          currentQuestionIndex: activeScenarioIdx,
+          scorePercent: currentScorePercent,
+          userPhoto: capturePhoto() || capturedPhoto
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return data.session;
+      }
+    } catch (e) {
+      console.warn("Error syncing session state:", e);
+    }
+    return null;
+  };
+
+  // Automatic state sync to backend
+  useEffect(() => {
+    if (!hasStarted) return;
+    const delayDebounce = setTimeout(() => {
+      syncSessionWithServer();
+    }, 500);
+    return () => clearTimeout(delayDebounce);
+  }, [proctorLogs, malpracticeCount, activeScenarioIdx, earnedPoints, totalPossiblePoints, capturedPhoto, hasStarted, isTerminated, showSummary]);
+
+  // Polling server for admin actions
+  useEffect(() => {
+    if (!hasStarted || showSummary || isTerminated) return;
+
+    const interval = setInterval(async () => {
+      // Sync client state (including new video frame) to server
+      syncSessionWithServer();
+      
+      try {
+        const res = await fetch(`/api/sessions/status/${certCode}`);
+        if (res.ok) {
+          const serverSession = await res.json();
+          
+          if (serverSession.status === "disqualified") {
+            setIsTerminated(true);
+            setMalpracticeAlert("EXAM TERMINATED: Manual proctor decision or warning threshold exceeded.");
+            setMalpracticeCount(serverSession.flags || 10);
+            if (serverSession.proctorLogs) {
+              setProctorLogs(serverSession.proctorLogs);
+            }
+            if (stream) {
+              stream.getTracks().forEach((track) => track.stop());
+              setStream(null);
+            }
+            clearInterval(interval);
+            return;
+          }
+
+          if (serverSession.flags !== undefined && serverSession.flags !== malpracticeCount) {
+            setMalpracticeCount(serverSession.flags);
+          }
+
+          if (serverSession.hideGamification !== undefined && serverSession.hideGamification !== hideGamification) {
+            setHideGamification(serverSession.hideGamification);
+          }
+
+          if (serverSession.proctorLogs && JSON.stringify(serverSession.proctorLogs) !== JSON.stringify(proctorLogs)) {
+            setProctorLogs(serverSession.proctorLogs);
+          }
+        }
+      } catch (err) {
+        console.warn("Polling status error:", err);
+      }
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [hasStarted, showSummary, isTerminated, certCode, malpracticeCount, proctorLogs, stream, hideGamification]);
+
+
+
+  // Fetch 20 random questions dynamically from the PostgreSQL database or fallback
   const initializeQuiz = async () => {
     setIsLoadingQuestions(true);
     setQuestionsError(null);
     try {
-      const response = await fetch("/api/questions");
-      if (!response.ok) {
-        throw new Error(`Failed to load questions: ${response.status} ${response.statusText}`);
+      let data = [];
+      try {
+        const response = await fetch("/api/questions");
+        if (response.ok) {
+          data = await response.json();
+        }
+      } catch (networkErr) {
+        console.warn("[QUIZ] API fetch failed, loading fallback questions:", networkErr);
       }
-      const data = await response.json();
+
+      if (!Array.isArray(data) || data.length === 0) {
+        data = FALLBACK_QUESTIONS;
+      }
       
       // Calculate total possible points
       const totalPoints = data.reduce((sum, q) => sum + (q.points || 5), 0);
@@ -593,8 +723,9 @@ function TestYourKnowledge() {
       setMalpracticeAlert(null);
       setProctorLogs(["[RE-INITIALIZED] Camera proctor calibration ready. All logs cleared."]);
     } catch (err) {
-      console.error("Error fetching questions from database:", err);
-      setQuestionsError(err.message || "Failed to fetch questions from database.");
+      console.warn("Error in initializeQuiz, using fallback questions:", err);
+      setQuizQuestions(FALLBACK_QUESTIONS);
+      setTotalPossiblePoints(FALLBACK_QUESTIONS.reduce((sum, q) => sum + (q.points || 5), 0));
     } finally {
       setIsLoadingQuestions(false);
     }
@@ -765,8 +896,6 @@ function TestYourKnowledge() {
   const finalScorePercent = totalPossiblePoints > 0 ? Math.round((earnedPoints / totalPossiblePoints) * 100) : 0;
   const isPassed = finalScorePercent >= 85;
 
-  // Generate dynamic Certificate Code based on score and time
-  const [certCode] = useState(() => `DFS-AUDIT-${Math.floor(100000 + Math.random() * 900000)}`);
   const certDate = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
 
   // Auto-save certificate to registry whenever summary screen is shown
@@ -951,11 +1080,44 @@ function TestYourKnowledge() {
                     setHasStarted(true);
                     const activeStream = await requestPermissions();
                     gamificationStore.triggerMission("PRELOADER");
+                    
+                    // Init sync on start
                     if (activeStream) {
-                      setTimeout(() => {
+                      setTimeout(async () => {
                         const snap = capturePhoto();
                         if (snap) setCapturedPhoto(snap);
+                        await fetch("/api/sessions/sync", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            sessionCode: certCode,
+                            userName: userName || "Test User",
+                            userState: userState || "Delhi NCR",
+                            status: "ongoing",
+                            proctorLogs: ["[SYSTEM INITIALIZED] Live exam started. Proctor monitoring active."],
+                            flags: 0,
+                            currentQuestionIndex: 0,
+                            scorePercent: 0,
+                            userPhoto: snap || null
+                          })
+                        });
                       }, 1500);
+                    } else {
+                      await fetch("/api/sessions/sync", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          sessionCode: certCode,
+                          userName: userName || "Test User",
+                          userState: userState || "Delhi NCR",
+                          status: "ongoing",
+                          proctorLogs: ["[SYSTEM INITIALIZED] Live exam started without camera feed. Proctor monitoring active."],
+                          flags: 0,
+                          currentQuestionIndex: 0,
+                          scorePercent: 0,
+                          userPhoto: null
+                        })
+                      });
                     }
                   }}
                   disabled={!rulesAccepted}
@@ -1035,13 +1197,6 @@ function TestYourKnowledge() {
               <span className="font-mono text-[9px] text-[#EF4444] font-black uppercase tracking-[0.2em] block">
                 EXAMINER IDENTIFICATION & ID VERIFICATION
               </span>
-              <button
-                type="button"
-                onClick={autofillDemoID}
-                className="text-[8px] font-mono text-amber-500 hover:text-amber-400 font-bold uppercase tracking-wider bg-amber-950/30 px-2 py-0.5 border border-amber-600/30 hover:border-amber-500 transition-colors cursor-pointer"
-              >
-                ⚡ AUTOFILL DEMO
-              </button>
             </div>
             
             <div className="space-y-3">
@@ -1058,9 +1213,14 @@ function TestYourKnowledge() {
                   className="w-full bg-zinc-950 border border-zinc-900 focus:border-[#EF4444] p-3 text-xs font-mono text-zinc-100 placeholder-zinc-800 focus:outline-none transition-colors"
                 />
                 {userName.toLowerCase().includes("test user") && (
-                  <div className="bg-amber-950/40 border border-amber-500/60 p-2 text-[9px] font-mono text-amber-300 flex items-center gap-1.5 mt-1.5">
-                    <Zap className="w-3.5 h-3.5 text-amber-400 flex-shrink-0 animate-pulse" />
-                    <span>⚡ TEST USER FAST-TRACK: Certificate awarded immediately upon answering 2 questions correctly!</span>
+                  <div className="bg-amber-950/40 border border-amber-500/60 p-2.5 text-[9px] font-mono text-amber-300 space-y-1 mt-1.5">
+                    <div className="flex items-center gap-1.5 font-bold uppercase text-amber-400">
+                      <Zap className="w-3.5 h-3.5 flex-shrink-0 animate-pulse" />
+                      <span>DEMO MODE ACTIVE FOR "TEST USER"</span>
+                    </div>
+                    <p className="text-[8.5px] text-zinc-300 font-sans leading-relaxed">
+                      All credentials kept strictly as demo data (no real credentials needed). Fast-track certificate unlocked after 2 correct answers!
+                    </p>
                   </div>
                 )}
               </div>
@@ -1263,7 +1423,8 @@ function TestYourKnowledge() {
           </div>
 
           {(() => {
-            const canStartExam = userName.trim() && userState.trim() && idNumber.trim() && isIdFormatValid() && idPhoto;
+            const isTestUser = userName.trim().toLowerCase().includes("test user");
+            const canStartExam = isTestUser || (userName.trim() && userState.trim() && idNumber.trim() && isIdFormatValid() && idPhoto);
             return (
               <div className="flex flex-col items-center space-y-2.5 w-full">
                 <button
@@ -1282,7 +1443,7 @@ function TestYourKnowledge() {
                 </button>
                 {!canStartExam && (
                   <span className="text-[9px] font-mono text-zinc-600 uppercase tracking-wider text-center max-w-sm leading-relaxed">
-                    Requirement Pending: Ensure Name, Jurisdiction, valid {idType === "aadhaar" ? "12-digit Aadhaar" : "10-char PAN"} format, and ID Scanned Card image are set. (Click "Autofill Demo" to skip)
+                    Requirement Pending: Ensure Name, Jurisdiction, valid {idType === "aadhaar" ? "12-digit Aadhaar" : "10-char PAN"} format, and ID image are set. (Or enter "Test User" as name to skip real credentials)
                   </span>
                 )}
               </div>
@@ -1368,7 +1529,9 @@ function TestYourKnowledge() {
             {/* Stats Summary */}
             <div className="flex items-center gap-4 font-mono text-[10px]">
               <span className="text-zinc-500">SCENARIO: <strong className="text-white">{activeScenarioIdx + 1} / 20</strong></span>
-              <span className="text-zinc-500">STATION XP: <strong className="text-green-400">{earnedPoints} PTS</strong></span>
+              {!hideGamification && (
+                <span className="text-zinc-500">STATION XP: <strong className="text-green-400">{earnedPoints} PTS</strong></span>
+              )}
               <span className="text-zinc-500">PROCTOR WARNINGS: <strong className={malpracticeCount > 6 ? "text-red-500 font-bold animate-pulse" : "text-amber-400"}>{malpracticeCount} / 10</strong></span>
             </div>
           </div>
@@ -1440,7 +1603,7 @@ function TestYourKnowledge() {
                     </span>
                     <span className="text-zinc-800 font-mono text-[9px]">•</span>
                     <span className={`px-2 py-0.5 border text-[8px] font-mono uppercase tracking-wider font-black ${getDifficultyBadge(currentScenario.difficulty)}`}>
-                      {currentScenario.difficulty} ({currentScenario.points} PTS)
+                      {currentScenario.difficulty} {!hideGamification && `(${currentScenario.points} PTS)`}
                     </span>
                   </div>
 
@@ -1820,11 +1983,18 @@ function TestYourKnowledge() {
                       <span className="text-red-500 font-bold">AUTOMATED AI ENGINE</span>
                     </div>
                     <div className="h-28 bg-zinc-950 border border-zinc-900/80 p-2 font-mono text-[8px] text-zinc-500 overflow-y-auto leading-relaxed flex flex-col-reverse custom-scrollbar">
-                      {proctorLogs.map((log, idx) => (
-                        <div key={idx} className={log.includes("!!!") ? "text-red-400 font-bold" : log.includes("stream secured") ? "text-emerald-500" : ""}>
-                          {log}
-                        </div>
-                      ))}
+                      {proctorLogs.map((log, idx) => {
+                        const msg = typeof log === 'object' ? (log.message || JSON.stringify(log)) : log;
+                        const isAlert = msg.includes("!!!");
+                        const isSuccess = msg.includes("stream secured");
+                        const isManual = typeof log === 'object';
+                        
+                        return (
+                          <div key={idx} className={isAlert ? "text-red-400 font-bold" : isSuccess ? "text-emerald-500" : isManual ? "text-amber-400 font-bold" : ""}>
+                            {msg}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 </div>
@@ -1978,7 +2148,9 @@ function TestYourKnowledge() {
                 {finalScorePercent}%
               </span>
               <span className="text-[9px] font-mono text-zinc-500 uppercase">Your Code Accuracy</span>
-              <span className="text-[9px] text-zinc-600 font-mono mt-0.5">{earnedPoints} of {totalPossiblePoints} points earned</span>
+              {!hideGamification && (
+                <span className="text-[9px] text-zinc-600 font-mono mt-0.5">{earnedPoints} of {totalPossiblePoints} points earned</span>
+              )}
             </div>
           </div>
 
@@ -2628,7 +2800,9 @@ function TestYourKnowledge() {
                       <XCircle className="w-4 h-4 text-red-500" />
                     )}
                     <span>{attemptedAnswers[reviewIdx].selected === "compliant" ? "Fully Compliant (Legal)" : "Non-Compliant (Illegal)"}</span>
-                    <span className="text-zinc-500 font-normal">({attemptedAnswers[reviewIdx].pointsEarned} Points Earned)</span>
+                    {!hideGamification && (
+                      <span className="text-zinc-500 font-normal">({attemptedAnswers[reviewIdx].pointsEarned} Points Earned)</span>
+                    )}
                   </div>
                 </div>
 

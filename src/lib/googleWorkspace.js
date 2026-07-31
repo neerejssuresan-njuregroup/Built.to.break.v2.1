@@ -34,6 +34,8 @@ const DEMO_CERTIFICATES = [
     activeTab: "nbc",
     certDate: "15 Jul 2026",
     status: "VERIFIED & ISSUED",
+    idType: "aadhaar",
+    idNumber: "9876-5432-1012",
     driveFileId: "1A2B3C4D5E_SAMPLE_DRIVE",
     driveViewUrl: "https://drive.google.com",
     sheetSynced: true
@@ -46,6 +48,8 @@ const DEMO_CERTIFICATES = [
     activeTab: "nbc",
     certDate: "18 Jul 2026",
     status: "VERIFIED & ISSUED",
+    idType: "pan",
+    idNumber: "ABCDE1234F",
     driveFileId: "2B3C4D5E6F_SAMPLE_DRIVE",
     driveViewUrl: "https://drive.google.com",
     sheetSynced: true
@@ -58,6 +62,8 @@ const DEMO_CERTIFICATES = [
     activeTab: "show",
     certDate: "20 Jul 2026",
     status: "VERIFIED & ISSUED",
+    idType: "aadhaar",
+    idNumber: "8765-4321-0987",
     driveFileId: "3C4D5E6F7G_SAMPLE_DRIVE",
     driveViewUrl: "https://drive.google.com",
     sheetSynced: true

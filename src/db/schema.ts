@@ -51,6 +51,30 @@ export const questions = pgTable("questions", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// Define the 'admins' table
+export const admins = pgTable("admins", {
+  id: serial("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Define the 'ongoing_sessions' table
+export const ongoingSessions = pgTable("ongoing_sessions", {
+  id: serial("id").primaryKey(),
+  sessionCode: text("session_code").notNull().unique(),
+  userName: text("user_name").notNull(),
+  userState: text("user_state"),
+  startTime: timestamp("start_time").defaultNow(),
+  status: text("status").notNull(), // 'ongoing', 'completed', 'disqualified'
+  proctorLogs: jsonb("proctor_logs").notNull(), // Array of logs
+  flags: integer("flags").default(0),
+  currentQuestionIndex: integer("current_question_index").default(0),
+  scorePercent: integer("score_percent").default(0),
+  userPhoto: text("user_photo"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   certificates: many(certificates),
