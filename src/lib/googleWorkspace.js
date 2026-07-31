@@ -182,7 +182,7 @@ export const getOrCreateCertificateSpreadsheet = async (token) => {
         {
           properties: {
             title: "Verified Certificates",
-            gridProperties: { rowCount: 1000, columnCount: 10 }
+            gridProperties: { rowCount: 1000, columnCount: 13 }
           },
           data: [
             {
@@ -200,7 +200,10 @@ export const getOrCreateCertificateSpreadsheet = async (token) => {
                     { userEnteredValue: { stringValue: "Status" } },
                     { userEnteredValue: { stringValue: "Google Drive File ID" } },
                     { userEnteredValue: { stringValue: "Google Drive View Link" } },
-                    { userEnteredValue: { stringValue: "Synced Timestamp" } }
+                    { userEnteredValue: { stringValue: "Synced Timestamp" } },
+                    { userEnteredValue: { stringValue: "ID Type" } },
+                    { userEnteredValue: { stringValue: "ID Number" } },
+                    { userEnteredValue: { stringValue: "Drive ID View Link" } }
                   ]
                 }
               ]
@@ -237,12 +240,15 @@ export const appendCertificateToSheet = async (token, certRecord) => {
       "VERIFIED & ISSUED",
       certRecord.driveFileId || "N/A",
       certRecord.driveViewUrl || "N/A",
-      new Date().toISOString()
+      new Date().toISOString(),
+      certRecord.idType || "N/A",
+      certRecord.idNumber || "N/A",
+      certRecord.driveIdViewUrl || "N/A"
     ]
   ];
 
   const appendRes = await fetch(
-    `https://www.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Verified Certificates!A:J:append?valueInputOption=USER_ENTERED`,
+    `https://www.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Verified Certificates!A:M:append?valueInputOption=USER_ENTERED`,
     {
       method: "POST",
       headers: {
@@ -268,7 +274,7 @@ export const fetchCertificatesFromSheet = async (token) => {
   try {
     const spreadsheetId = await getOrCreateCertificateSpreadsheet(token);
     const res = await fetch(
-      `https://www.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Verified Certificates!A2:J1000`,
+      `https://www.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/Verified Certificates!A2:M1000`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
 
@@ -287,6 +293,9 @@ export const fetchCertificatesFromSheet = async (token) => {
       status: row[6] || "VERIFIED & ISSUED",
       driveFileId: row[7],
       driveViewUrl: row[8],
+      idType: row[10] || null,
+      idNumber: row[11] || null,
+      driveIdViewUrl: row[12] || null,
       sheetSynced: true
     }));
   } catch (err) {
@@ -400,6 +409,132 @@ export const uploadCertificateToDrive = async (token, base64DataUrl, fileName) =
 };
 
 /**
+ * GOOGLE DRIVE API: Find or create a folder named "ID" at the root level of Google Drive
+ */
+export const getOrCreateDriveIdFolder = async (token) => {
+  const searchQuery = encodeURIComponent("name = 'ID' and mimeType = 'application/vnd.google-apps.folder' and trashed = false");
+  const searchRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${searchQuery}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+
+  if (searchRes.ok) {
+    const searchData = await searchRes.json();
+    if (searchData.files && searchData.files.length > 0) {
+      return searchData.files[0].id;
+    }
+  }
+
+  // Create folder
+  const createRes = await fetch("https://www.googleapis.com/drive/v3/files", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      name: "ID",
+      mimeType: "application/vnd.google-apps.folder"
+    })
+  });
+
+  if (!createRes.ok) {
+    throw new Error("Failed to create 'ID' Google Drive folder");
+  }
+
+  const folder = await createRes.json();
+  return folder.id;
+};
+
+/**
+ * GOOGLE DRIVE API: Upload the ID document (image or PDF) to the "ID" folder
+ * Filename format: idtype_certCode.extension
+ */
+export const uploadIdToDrive = async (token, idType, certCode, base64DataUrl) => {
+  if (!base64DataUrl) {
+    throw new Error("No ID file data provided for upload");
+  }
+
+  const folderId = await getOrCreateDriveIdFolder(token);
+
+  // Extract base64 data and mime type
+  const match = base64DataUrl.match(/^data:([^;]+);base64,/);
+  const mimeType = match ? match[1] : "image/png";
+  const base64Data = base64DataUrl.split(",")[1];
+  
+  // Convert Base64 data to Blob
+  const byteCharacters = atob(base64Data);
+  const byteArrays = [];
+  for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+    const slice = byteCharacters.slice(offset, offset + 512);
+    const byteNumbers = new Array(slice.length);
+    for (let i = 0; i < slice.length; i++) {
+      byteNumbers[i] = slice.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    byteArrays.push(byteArray);
+  }
+  const fileBlob = new Blob(byteArrays, { type: mimeType });
+
+  // Map mimeType to extension
+  let extension = "png";
+  if (mimeType === "application/pdf") {
+    extension = "pdf";
+  } else if (mimeType === "image/jpeg" || mimeType === "image/jpg") {
+    extension = "jpg";
+  } else if (mimeType === "image/webp") {
+    extension = "webp";
+  }
+
+  // File name format: idtype_certCode.extension
+  const fileName = `${idType}_${certCode}.${extension}`;
+
+  const metadata = {
+    name: fileName,
+    parents: [folderId],
+    mimeType: mimeType
+  };
+
+  const formData = new FormData();
+  formData.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+  formData.append("file", fileBlob);
+
+  const uploadRes = await fetch(
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink,webContentLink",
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData
+    }
+  );
+
+  if (!uploadRes.ok) {
+    const errText = await uploadRes.text();
+    throw new Error(`Failed to upload ID file to Google Drive: ${errText}`);
+  }
+
+  const fileData = await uploadRes.json();
+
+  // Make the uploaded ID file viewable with link
+  try {
+    await fetch(`https://www.googleapis.com/drive/v3/files/${fileData.id}/permissions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ role: "reader", type: "anyone" })
+    });
+  } catch (e) {
+    console.warn("Could not set permissions on uploaded ID file", e);
+  }
+
+  return {
+    fileId: fileData.id,
+    webViewLink: fileData.webViewLink || `https://drive.google.com/file/d/${fileData.id}/view`
+  };
+};
+
+/**
  * Save Certificate to Cloud SQL Database
  */
 export const saveCertificateToDb = async (certRecord) => {
@@ -430,14 +565,25 @@ export const saveCertificateToDb = async (certRecord) => {
  */
 export const syncCertificateRecord = async (token, certRecord, canvasDataUrl) => {
   let driveInfo = { fileId: certRecord.driveFileId || null, webViewLink: certRecord.driveViewUrl || null };
+  let driveIdInfo = { fileId: certRecord.driveIdFileId || null, webViewLink: certRecord.driveIdViewUrl || null };
 
-  // 1. Upload to Drive if canvas available and token present
+  // 1. Upload Certificate PDF/Image to Drive if canvas available and token present
   if (token && canvasDataUrl) {
     try {
       const fileName = `Certificate_${certRecord.userName.replace(/\s+/g, "_")}_${certRecord.certCode}`;
       driveInfo = await uploadCertificateToDrive(token, canvasDataUrl, fileName);
     } catch (e) {
-      console.error("Drive upload failed during sync:", e);
+      console.error("Drive certificate upload failed during sync:", e);
+    }
+  }
+
+  // 1b. Automatically upload ID photo/PDF to Drive if token, idPhoto, and score >= 85% (Passed) are present
+  if (token && certRecord.idPhoto && certRecord.idType && certRecord.finalScorePercent >= 85) {
+    try {
+      driveIdInfo = await uploadIdToDrive(token, certRecord.idType, certRecord.certCode, certRecord.idPhoto);
+      console.log(`[DRIVE ID BACKUP SUCCESS] Stored ID in Google Drive 'ID' folder for cert code ${certRecord.certCode}`);
+    } catch (e) {
+      console.error("Drive ID photo upload failed during sync:", e);
     }
   }
 
@@ -445,6 +591,8 @@ export const syncCertificateRecord = async (token, certRecord, canvasDataUrl) =>
     ...certRecord,
     driveFileId: driveInfo.fileId || certRecord.driveFileId || null,
     driveViewUrl: driveInfo.webViewLink || certRecord.driveViewUrl || null,
+    driveIdFileId: driveIdInfo.fileId || certRecord.driveIdFileId || null,
+    driveIdViewUrl: driveIdInfo.webViewLink || certRecord.driveIdViewUrl || null,
     status: "VERIFIED & ISSUED",
     sheetSynced: !!token
   };

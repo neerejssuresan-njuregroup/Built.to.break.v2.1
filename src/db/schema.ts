@@ -23,6 +23,12 @@ export const certificates = pgTable("certificates", {
   driveFileId: text("drive_file_id"),
   driveViewUrl: text("drive_view_url"),
   status: text("status"),
+  userPhoto: text("user_photo"),
+  idType: text("id_type"),
+  idNumber: text("id_number"),
+  idPhoto: text("id_photo"),
+  driveIdFileId: text("drive_id_file_id"),
+  driveIdViewUrl: text("drive_id_view_url"),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

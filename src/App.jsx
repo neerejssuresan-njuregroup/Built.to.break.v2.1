@@ -41,6 +41,7 @@ import NbcAuditPanel from "./components/NbcAuditPanel";
 import EmberOverlay from "./components/EmberOverlay";
 import DocumentaryInside from "./components/DocumentaryInside";
 import TestYourKnowledge from "./components/TestYourKnowledge";
+import ErrorScreen from "./components/ErrorScreen";
 import { audioEngine } from "./lib/AudioEngine";
 import GamificationHUD from "./components/GamificationHUD";
 import { gamificationStore } from "./lib/GamificationStore";
@@ -75,6 +76,39 @@ export default function App() {
   const [showNbcPortal, setShowNbcPortal] = useState(false);
   const [showVerificationModal, setShowVerificationModal] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
+
+  // 404, 403, 503 error states and URL listener
+  const [errorState, setErrorState] = useState(null);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  useEffect(() => {
+    const checkPath = () => {
+      const path = window.location.pathname;
+      if (path !== "/" && path !== "" && !path.includes("index.html")) {
+        if (path === "/admin" || path === "/restricted" || path === "/dossier") {
+          setErrorState("403");
+          setErrorMessage("Biometric validation failed. Path " + path + " is restricted to regional municipal fire marshals.");
+        } else if (path === "/error" || path === "/down" || path === "/offline") {
+          setErrorState("503");
+          setErrorMessage("SQL database connection failed or central API service is offline.");
+        } else {
+          setErrorState("404");
+          setErrorMessage("The requested path " + path + " does not exist in the fire compliance registry.");
+        }
+      } else {
+        setErrorState(null);
+      }
+    };
+
+    checkPath();
+    window.addEventListener("popstate", checkPath);
+    return () => window.removeEventListener("popstate", checkPath);
+  }, []);
+
+  const handleNavigateHome = () => {
+    window.history.pushState({}, "", "/");
+    setErrorState(null);
+  };
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -285,6 +319,23 @@ export default function App() {
 
   return (
     <div className="bg-[#0A0A0A] text-zinc-100 min-h-screen font-sans antialiased selection:bg-[#EF4444]/30 selection:text-red-200" id="app-root-container">
+      {/* 404, 403, 503 Error screens */}
+      <AnimatePresence>
+        {errorState && (
+          <ErrorScreen
+            type={errorState}
+            message={errorMessage}
+            onRetry={() => {
+              setErrorMessage("Re-verifying security clearance and database handshakes...");
+              setTimeout(() => {
+                setErrorState(null);
+              }, 1200);
+            }}
+            onNavigateHome={handleNavigateHome}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Immersive High-Tech Risk Assessment Preloader */}
       <AnimatePresence>
         {showPreloader && (
@@ -416,7 +467,8 @@ export default function App() {
               id="header-verify-cert-btn"
             >
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>VERIFY CERTIFICATE</span>
+              <span className="hidden sm:inline">VERIFY CERTIFICATE</span>
+              <span className="inline sm:hidden">VERIFY</span>
             </button>
 
             {currentUser ? (
@@ -461,7 +513,7 @@ export default function App() {
             )}
 
             <span className="hidden lg:inline-block text-[10px] font-bold tracking-[0.1em] text-[#F97316] bg-[#F97316]/10 px-3 py-1 rounded-full border border-[#F97316]/20">
-              DELHI_RISK_STUDY_v2.0
+              DELHI_RISK_STUDY_v2.1
             </span>
             <button
               onClick={() => {
@@ -1181,7 +1233,7 @@ export default function App() {
 
       {/* Public Certificate Verification Banner Section */}
       <section className="relative w-full bg-[#07090b] border-t border-emerald-900/50 py-16 px-6 relative z-10" id="section-verify-portal-callout">
-        <div className="max-w-5xl mx-auto bg-black border border-emerald-500/40 p-8 md:p-10 shadow-[0_0_50px_rgba(16,185,129,0.1)] flex flex-col md:flex-row items-center justify-between gap-6">
+        <div className="max-w-5xl mx-auto bg-black border border-emerald-500/40 p-6 sm:p-8 md:p-10 shadow-[0_0_50px_rgba(16,185,129,0.1)] flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="space-y-2 text-left">
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-5 h-5 text-emerald-400" />
@@ -1211,10 +1263,10 @@ export default function App() {
       <footer className="bg-black border-t border-red-950/30 py-16 px-6 relative z-10">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="brand font-black italic text-2xl tracking-tighter text-zinc-100 animate-text-glitch">
-            BUILT_TO_BREAK_v2.0
+            BUILT_TO_BREAK_v2.1
           </div>
-          <div className="flex gap-3 text-zinc-600 font-mono text-[10px] uppercase tracking-widest font-black">
-            STORY SYSTEM DESIGNED BY SYSTEMS AUDIT
+          <div className="flex flex-wrap items-center gap-3 text-zinc-600 font-mono text-[10px] uppercase tracking-widest font-black">
+            <span>STORY SYSTEM DESIGNED BY SYSTEMS AUDIT</span>
           </div>
         </div>
       </footer>
@@ -1248,6 +1300,7 @@ export default function App() {
           <NbcAuditPanel 
             isOpen={showNbcPortal}
             onClose={() => setShowNbcPortal(false)}
+            audioEngine={audioEngine}
           />
         )}
       </AnimatePresence>

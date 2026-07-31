@@ -11,9 +11,9 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // Body parsers
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+  // Body parsers with increased limit for base64 photo uploads
+  app.use(express.json({ limit: "20mb" }));
+  app.use(express.urlencoded({ limit: "20mb", extended: true }));
 
   // API Route: Healthcheck
   app.get("/api/health", (req, res) => {
@@ -63,7 +63,13 @@ async function startServer() {
         activeTab,
         driveFileId,
         driveViewUrl,
-        status
+        status,
+        userPhoto,
+        idType,
+        idNumber,
+        idPhoto,
+        driveIdFileId,
+        driveIdViewUrl
       } = req.body;
 
       if (!certCode || !userName) {
@@ -112,7 +118,13 @@ async function startServer() {
           activeTab: activeTab || "nbc",
           driveFileId: driveFileId || null,
           driveViewUrl: driveViewUrl || null,
-          status: status || "VERIFIED & ISSUED"
+          status: status || "VERIFIED & ISSUED",
+          userPhoto: userPhoto || null,
+          idType: idType || null,
+          idNumber: idNumber || null,
+          idPhoto: idPhoto || null,
+          driveIdFileId: driveIdFileId || null,
+          driveIdViewUrl: driveIdViewUrl || null
         })
         .onConflictDoUpdate({
           target: certificates.certCode,
@@ -125,7 +137,13 @@ async function startServer() {
             activeTab: activeTab || "nbc",
             driveFileId: driveFileId || null,
             driveViewUrl: driveViewUrl || null,
-            status: status || "VERIFIED & ISSUED"
+            status: status || "VERIFIED & ISSUED",
+            userPhoto: userPhoto || null,
+            idType: idType || null,
+            idNumber: idNumber || null,
+            idPhoto: idPhoto || null,
+            driveIdFileId: driveIdFileId || null,
+            driveIdViewUrl: driveIdViewUrl || null
           }
         })
         .returning();
@@ -155,6 +173,12 @@ async function startServer() {
         driveFileId: certificates.driveFileId,
         driveViewUrl: certificates.driveViewUrl,
         status: certificates.status,
+        userPhoto: certificates.userPhoto,
+        idType: certificates.idType,
+        idNumber: certificates.idNumber,
+        idPhoto: certificates.idPhoto,
+        driveIdFileId: certificates.driveIdFileId,
+        driveIdViewUrl: certificates.driveIdViewUrl,
         createdAt: certificates.createdAt,
         creatorEmail: users.email,
         creatorDisplayName: users.displayName,
@@ -179,6 +203,12 @@ async function startServer() {
           driveFileId: certificates.driveFileId,
           driveViewUrl: certificates.driveViewUrl,
           status: certificates.status,
+          userPhoto: certificates.userPhoto,
+          idType: certificates.idType,
+          idNumber: certificates.idNumber,
+          idPhoto: certificates.idPhoto,
+          driveIdFileId: certificates.driveIdFileId,
+          driveIdViewUrl: certificates.driveIdViewUrl,
           createdAt: certificates.createdAt,
           creatorEmail: users.email,
           creatorDisplayName: users.displayName,

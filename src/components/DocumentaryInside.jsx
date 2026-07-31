@@ -31,6 +31,7 @@ import {
   AlertTriangle,
   Play,
   Volume2,
+  VolumeX,
   BookOpen,
   UserX,
   FileText,
@@ -259,6 +260,16 @@ const EVIDENCE_DATABASE = {
 function DocumentaryInside({ onClose, audioEngine }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
+  const [isAudioMuted, setIsAudioMuted] = useState(audioEngine ? audioEngine.getIsMuted() : false);
+
+  const toggleMute = () => {
+    if (audioEngine) {
+      const newMuted = !audioEngine.getIsMuted();
+      audioEngine.setMuted(newMuted);
+      setIsAudioMuted(newMuted);
+    }
+  };
+
   const [scrollPosition, setScrollPosition] = useState(0);
   const [scrollProgress, setScrollProgress] = useState(0);
   const [activeTimelineItem, setActiveTimelineItem] = useState(0);
@@ -1043,9 +1054,21 @@ function DocumentaryInside({ onClose, audioEngine }) {
           EXIT DOCUMENTARY INQUEST
         </button>
 
-        <div className="flex items-center gap-3 font-mono text-[10px] tracking-widest text-zinc-400">
-          <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
-          <span>LOCATION_FEED: FLOURISH_STAY_BB_FORENSICS</span>
+        <div className="flex items-center gap-4">
+          {audioEngine && (
+            <button
+              onClick={toggleMute}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-[#EF4444]/30 bg-red-950/10 text-[10px] font-mono font-bold uppercase hover:bg-zinc-900 hover:border-zinc-500 hover:text-white transition-all duration-300 rounded-none cursor-pointer"
+              title={isAudioMuted ? "Unmute Ambient Audio" : "Mute Ambient Audio"}
+            >
+              {isAudioMuted ? <VolumeX className="w-3.5 h-3.5 text-red-500 animate-pulse" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-500" />}
+              <span>{isAudioMuted ? "MUTED" : "SOUND_ON"}</span>
+            </button>
+          )}
+          <div className="flex items-center gap-3 font-mono text-[10px] tracking-widest text-zinc-400">
+            <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
+            <span>LOCATION_FEED: FLOURISH_STAY_BB_FORENSICS</span>
+          </div>
         </div>
       </header>
 
@@ -1868,7 +1891,7 @@ function DocumentaryInside({ onClose, audioEngine }) {
 
           {/* Action Footer Callout */}
           <motion.section 
-            className="bg-red-950/15 border border-[#EF4444]/20 p-8 text-center flex flex-col items-center justify-center max-w-4xl mx-auto rounded-none"
+            className="bg-red-950/15 border border-[#EF4444]/20 p-6 sm:p-8 text-center flex flex-col items-center justify-center max-w-4xl mx-auto rounded-none"
             initial={{ opacity: 0, scale: 0.95 }}
             whileInView={{ opacity: 1, scale: 1 }}
             viewport={{ once: true }}

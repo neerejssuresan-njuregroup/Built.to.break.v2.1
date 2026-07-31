@@ -39,7 +39,9 @@ import {
   AlertCircle,
   HelpCircle,
   Clock,
-  ExternalLink
+  ExternalLink,
+  Volume2,
+  VolumeX
 } from "lucide-react";
 
 // Robust information mapping for Indian National Building Code Architecture and corporate workarounds
@@ -141,8 +143,17 @@ const NBC_AUDIT_SECTIONS = [
   }
 ];
 
-function NbcAuditPanel({ isOpen, onClose }) {
+function NbcAuditPanel({ isOpen, onClose, audioEngine }) {
   const [selectedSection, setSelectedSection] = useState(NBC_AUDIT_SECTIONS[0]);
+  const [isAudioMuted, setIsAudioMuted] = useState(audioEngine ? audioEngine.getIsMuted() : false);
+
+  const toggleMute = () => {
+    if (audioEngine) {
+      const newMuted = !audioEngine.getIsMuted();
+      audioEngine.setMuted(newMuted);
+      setIsAudioMuted(newMuted);
+    }
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -272,9 +283,19 @@ function NbcAuditPanel({ isOpen, onClose }) {
             <span className="hidden lg:inline-block font-mono text-[9px] text-zinc-500 uppercase tracking-wider bg-zinc-900/60 border border-zinc-900 px-3 py-1">
               RECORD STATUS: INTERNAL_AUDIT_VERIFIED
             </span>
+            {audioEngine && (
+              <button
+                onClick={toggleMute}
+                className="flex items-center gap-1.5 px-3 py-2 border border-zinc-800 bg-zinc-950 text-xs font-mono font-bold uppercase hover:bg-zinc-900 hover:border-zinc-500 hover:text-white transition-all duration-300 rounded-none shadow-[0_0_15px_rgba(0,0,0,0.5)] cursor-pointer"
+                title={isAudioMuted ? "Unmute Ambient Audio" : "Mute Ambient Audio"}
+              >
+                {isAudioMuted ? <VolumeX className="w-4 h-4 text-red-500 animate-pulse" /> : <Volume2 className="w-4 h-4 text-emerald-500" />}
+                <span className="hidden sm:inline">{isAudioMuted ? "MUTED" : "SOUND_ON"}</span>
+              </button>
+            )}
             <button
               onClick={onClose}
-              className="flex items-center gap-1.5 px-4 py-2 border border-zinc-800 bg-zinc-950 text-xs font-mono font-bold uppercase hover:bg-red-950/20 hover:border-red-500 hover:text-red-400 transition-all duration-300 rounded-none shadow-[0_0_15px_rgba(0,0,0,0.5)]"
+              className="flex items-center gap-1.5 px-4 py-2 border border-zinc-800 bg-zinc-950 text-xs font-mono font-bold uppercase hover:bg-red-950/20 hover:border-red-500 hover:text-red-400 transition-all duration-300 rounded-none shadow-[0_0_15px_rgba(0,0,0,0.5)] cursor-pointer"
               id="close-nbc-portal-btn"
             >
               <X className="w-4 h-4" />

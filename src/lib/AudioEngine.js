@@ -7,6 +7,7 @@ class AudioEngine {
   constructor() {
     this.ctx = null;
     this.isPlaying = false;
+    this.isMuted = false;
 
     // Nodes
     this.masterGain = null;
@@ -49,7 +50,8 @@ class AudioEngine {
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.setValueAtTime(0.0, this.ctx.currentTime);
     // Smooth ramp-in
-    this.masterGain.gain.linearRampToValueAtTime(0.6, this.ctx.currentTime + 1.5);
+    const targetVolume = this.isMuted ? 0.0 : 0.6;
+    this.masterGain.gain.linearRampToValueAtTime(targetVolume, this.ctx.currentTime + 1.5);
     this.masterGain.connect(this.ctx.destination);
 
     // 1. Deep Rumble / Ominous Drone (38Hz)
@@ -228,6 +230,19 @@ class AudioEngine {
 
   getIsPlaying() {
     return this.isPlaying;
+  }
+
+  setMuted(muted) {
+    this.isMuted = muted;
+    if (this.masterGain && this.ctx) {
+      const time = this.ctx.currentTime;
+      const targetVolume = muted ? 0.0 : 0.6;
+      this.masterGain.gain.linearRampToValueAtTime(targetVolume, time + 0.3);
+    }
+  }
+
+  getIsMuted() {
+    return this.isMuted;
   }
 }
 

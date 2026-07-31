@@ -94,13 +94,16 @@ function drawZapIcon(ctx, x, y, size, color) {
   ctx.restore();
 }
 
-export const generateCertificateCanvasDataUrl = ({
+export const generateCertificateCanvasDataUrl = async ({
   userName = "Examinee",
   userState = "Delhi NCR",
   finalScorePercent = 100,
   certCode = "BTB-8921-X",
   certDate = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
-  activeTab = "nbc"
+  activeTab = "nbc",
+  userPhoto = null,
+  idType = "",
+  idNumber = ""
 }) => {
   const width = 2000;
   const height = 1414; // A4 Landscape ratio (1.414:1)
@@ -423,11 +426,62 @@ export const generateCertificateCanvasDataUrl = ({
   ctx.font = "bold 18px monospace";
   ctx.fillText(fullCertCode, width - 120, footY + 28);
 
+  // 11. Optional Proctor Verified Face Identity (Top Left Card)
+  if (userPhoto) {
+    try {
+      const img = await new Promise((resolve) => {
+        const i = new Image();
+        i.onload = () => resolve(i);
+        i.onerror = () => resolve(null);
+        i.src = userPhoto;
+      });
+
+      if (img) {
+        const photoWidth = 180;
+        const photoHeight = 225;
+        const photoX = 100;
+        const photoY = 100;
+
+        // Draw card background & high-security border
+        ctx.save();
+        ctx.fillStyle = "#090d11";
+        ctx.strokeStyle = isNbc ? "rgba(16, 185, 129, 0.4)" : "rgba(239, 68, 68, 0.4)";
+        ctx.lineWidth = 3;
+        
+        ctx.fillRect(photoX - 8, photoY - 8, photoWidth + 16, photoHeight + 36);
+        ctx.strokeRect(photoX - 8, photoY - 8, photoWidth + 16, photoHeight + 36);
+
+        // Draw photo
+        ctx.drawImage(img, photoX, photoY, photoWidth, photoHeight);
+
+        // Draw "VERIFIED" banner overlay
+        const badgeH = 26;
+        ctx.fillStyle = "rgba(6, 78, 59, 0.85)";
+        ctx.fillRect(photoX, photoY + photoHeight - badgeH, photoWidth, badgeH);
+        
+        ctx.font = "bold 11px monospace";
+        ctx.fillStyle = "#34d399";
+        ctx.textAlign = "center";
+        ctx.fillText("PROCTOR VERIFIED", photoX + photoWidth / 2, photoY + photoHeight - badgeH / 2 + 4);
+
+        // Subtitle text
+        ctx.font = "bold 10px monospace";
+        ctx.fillStyle = "#9ca3af";
+        ctx.textAlign = "center";
+        ctx.fillText("EXAMINEE PHOTO ID", photoX + photoWidth / 2, photoY + photoHeight + 18);
+        
+        ctx.restore();
+      }
+    } catch (e) {
+      console.warn("Could not draw proctor photo on certificate canvas:", e);
+    }
+  }
+
   return canvas.toDataURL("image/png");
 };
 
-export const downloadCertificatePdf = (options) => {
-  const dataUrl = generateCertificateCanvasDataUrl(options);
+export const downloadCertificatePdf = async (options) => {
+  const dataUrl = await generateCertificateCanvasDataUrl(options);
   if (!dataUrl) return false;
 
   const pdf = new jsPDF({
@@ -444,8 +498,8 @@ export const downloadCertificatePdf = (options) => {
   return true;
 };
 
-export const downloadCertificatePng = (options) => {
-  const dataUrl = generateCertificateCanvasDataUrl(options);
+export const downloadCertificatePng = async (options) => {
+  const dataUrl = await generateCertificateCanvasDataUrl(options);
   if (!dataUrl) return false;
 
   const safeName = (options.userName || "Examinee").trim().replace(/[^a-zA-Z0-9_]/g, "_");
@@ -457,8 +511,8 @@ export const downloadCertificatePng = (options) => {
   return true;
 };
 
-export const printCertificateImage = (options) => {
-  const dataUrl = generateCertificateCanvasDataUrl(options);
+export const printCertificateImage = async (options) => {
+  const dataUrl = await generateCertificateCanvasDataUrl(options);
   if (!dataUrl) {
     window.print();
     return;

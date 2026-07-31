@@ -35,16 +35,21 @@ import {
   Lock,
   Check,
   Users,
+  User,
   Hand,
   UserCheck,
   Activity,
   Mic,
-  Download
+  Download,
+  Upload,
+  Cloud,
+  Loader2,
+  UploadCloud
 } from "lucide-react";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import { gamificationStore } from "../lib/GamificationStore";
-import { saveLocalCertificate, saveCertificateToDb } from "../lib/googleWorkspace";
+import { saveLocalCertificate, saveCertificateToDb, getAccessToken, uploadIdToDrive } from "../lib/googleWorkspace";
 import { 
   downloadCertificatePdf, 
   downloadCertificatePng, 
@@ -103,11 +108,113 @@ function TestYourKnowledge() {
   const [userName, setUserName] = useState("");
   const [userState, setUserState] = useState("");
   const [activeCertificateTab, setActiveCertificateTab] = useState("nbc");
+
+  // ID Verification States
+  const [idType, setIdType] = useState("aadhaar"); // "aadhaar" | "pan"
+  const [idNumber, setIdNumber] = useState("");
+  const [idPhoto, setIdPhoto] = useState(null);
+  const [idPhotoName, setIdPhotoName] = useState("");
+  const [isIdDragging, setIsIdDragging] = useState(false);
+  const [driveIdUploaded, setDriveIdUploaded] = useState(false);
+  const [driveIdUploading, setDriveIdUploading] = useState(false);
+  const [driveUploadError, setDriveUploadError] = useState(null);
+
+  const isIdFormatValid = () => {
+    const raw = idNumber.replace(/[^a-zA-Z0-9]/g, "");
+    if (idType === "aadhaar") {
+      return /^\d{12}$/.test(raw);
+    } else {
+      return /^[A-Z]{5}\d{4}[A-Z]$/i.test(raw);
+    }
+  };
+
+  const handleIdNumberChange = (val, type = idType) => {
+    let raw = val.replace(/[^a-zA-Z0-9]/g, "");
+    if (type === "aadhaar") {
+      raw = raw.replace(/[^0-9]/g, "").slice(0, 12);
+      const parts = [];
+      for (let i = 0; i < raw.length; i += 4) {
+        parts.push(raw.slice(i, i + 4));
+      }
+      setIdNumber(parts.join(" - "));
+    } else {
+      raw = raw.toUpperCase().slice(0, 10);
+      setIdNumber(raw);
+    }
+  };
+
+  const handleIdPhotoFile = (file) => {
+    if (!file) return;
+    const isImage = file.type.startsWith("image/");
+    const isPdf = file.type === "application/pdf";
+    if (!isImage && !isPdf) {
+      logProctor("[ERROR] Invalid file type for ID card. Please upload an image or PDF file.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target.result;
+      setIdPhoto(result);
+      setIdPhotoName(file.name);
+      logProctor(`[SUCCESS] Physical ${typeLabel(idType)} ${isPdf ? "PDF" : "image"} loaded successfully.`);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const autofillDemoID = () => {
+    setUserName("Arjun Sharma");
+    setUserState("Delhi NCR");
+    setIdType("aadhaar");
+    handleIdNumberChange("987654321012", "aadhaar");
+    setIdPhoto("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='100' viewBox='0 0 160 100'><rect width='100%' height='100%' fill='%2312131a'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='%2310b981' font-size='10' font-family='monospace'>DEMO AADHAAR ID</text></svg>");
+    setIdPhotoName("demo_aadhaar_card.png");
+    logProctor("[INFO] Demo examiner ID pre-filled for testing.");
+  };
+
+  const typeLabel = (t) => t === "aadhaar" ? "Aadhaar Card" : "PAN Card";
+  
   
   // Camera & Proctoring states
   const [stream, setStream] = useState(null);
   const [cameraError, setCameraError] = useState(false);
   const [showExpandedCam, setShowExpandedCam] = useState(false);
+  const [capturedPhoto, setCapturedPhoto] = useState(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [showRulesModal, setShowRulesModal] = useState(false);
+  const [rulesAccepted, setRulesAccepted] = useState(false);
+
+  const handlePhotoFile = (file) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      logProctor("[ERROR] Invalid file type. Please upload a valid image.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = e.target.result;
+      setCapturedPhoto(result);
+      logProctor("[SUCCESS] Identity photo registered successfully.");
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handlePhotoFile(e.dataTransfer.files[0]);
+    }
+  };
+
   const videoRef = React.useRef(null);
   const expandedVideoRef = React.useRef(null);
   const canvasRef = React.useRef(null);
@@ -180,8 +287,37 @@ function TestYourKnowledge() {
     }
   };
 
+  const capturePhoto = () => {
+    if (videoRef.current) {
+      const video = videoRef.current;
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        if (video.readyState >= video.HAVE_CURRENT_DATA) {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          try {
+            return canvas.toDataURL("image/png");
+          } catch (e) {
+            console.error("Failed to extract canvas base64 image:", e);
+          }
+        }
+      }
+    }
+    return null;
+  };
+
   // Request camera and microphone permissions directly from browser
   const requestPermissions = async () => {
+    if (stream && stream.getTracks().some(track => track.readyState === 'live')) {
+      if (videoRef.current && videoRef.current.srcObject !== stream) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
+      }
+      return stream;
+    }
+
     if (typeof navigator === "undefined" || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       setCameraError(true);
       logProctor("Camera/mic media devices not supported in this browser environment.");
@@ -389,6 +525,30 @@ function TestYourKnowledge() {
     }
   }, [hasStarted, showSummary, isTerminated]);
 
+  // Revoke camera and microphone access when exam is completed or terminated
+  useEffect(() => {
+    if (showSummary || isTerminated) {
+      if (stream) {
+        stream.getTracks().forEach((track) => {
+          track.stop();
+          console.log(`[PROCTOR] Revoked track: ${track.kind}`);
+        });
+        setStream(null);
+      }
+    }
+  }, [showSummary, isTerminated, stream]);
+
+  // Clean up all media tracks if the component unmounts
+  useEffect(() => {
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach((track) => {
+          track.stop();
+        });
+      }
+    };
+  }, [stream]);
+
   // Handle malpractice cleanup alert timers
   useEffect(() => {
     if (malpracticeAlert) {
@@ -457,22 +617,26 @@ function TestYourKnowledge() {
     finalScorePercent,
     certCode,
     certDate,
-    activeTab: activeCertificateTab
+    activeTab: activeCertificateTab,
+    userPhoto: capturedPhoto,
+    idType,
+    idNumber,
+    idPhoto
   });
 
-  const handleDownloadPdf = () => {
+  const handleDownloadPdf = async () => {
     logProctor("Exporting standalone vector PDF certificate...");
-    downloadCertificatePdf(getCertOptions());
+    await downloadCertificatePdf(getCertOptions());
   };
 
-  const handleDownloadPng = () => {
+  const handleDownloadPng = async () => {
     logProctor("Exporting high-res PNG certificate image...");
-    downloadCertificatePng(getCertOptions());
+    await downloadCertificatePng(getCertOptions());
   };
 
-  const handlePrintCert = () => {
+  const handlePrintCert = async () => {
     logProctor("Initiating print document view...");
-    printCertificateImage(getCertOptions());
+    await printCertificateImage(getCertOptions());
   };
 
   const handleSubmit = () => {
@@ -519,6 +683,10 @@ function TestYourKnowledge() {
 
     if (isTestUser && correctCount >= 2) {
       logProctor("[TEST USER MODE] 2 Correct Answers Achieved — Certificate Unlocked Immediately!");
+      if (videoRef.current) {
+        const snap = capturePhoto();
+        if (snap) setCapturedPhoto(snap);
+      }
       setTimeout(() => {
         setEarnedPoints(100);
         setTotalPossiblePoints(100);
@@ -536,6 +704,10 @@ function TestYourKnowledge() {
     const correctCount = Object.values(attemptedAnswers).filter((a) => a.isCorrect).length;
 
     if (isTestUser && correctCount >= 2) {
+      if (videoRef.current) {
+        const snap = capturePhoto();
+        if (snap) setCapturedPhoto(snap);
+      }
       setEarnedPoints(100);
       setTotalPossiblePoints(100);
       gamificationStore.recordQuizScore(100, true, 100);
@@ -550,6 +722,11 @@ function TestYourKnowledge() {
       const finalScorePercent = Math.round((earnedPoints / totalPossiblePoints) * 100);
       const passed = finalScorePercent >= 85;
       
+      if (videoRef.current) {
+        const snap = capturePhoto();
+        if (snap) setCapturedPhoto(snap);
+      }
+
       gamificationStore.recordQuizScore(finalScorePercent, passed, earnedPoints);
       setShowSummary(true);
     }
@@ -605,12 +782,57 @@ function TestYourKnowledge() {
         status: "VERIFIED & ISSUED",
         driveFileId: null,
         driveViewUrl: null,
-        sheetSynced: false
+        sheetSynced: false,
+        userPhoto: capturedPhoto,
+        idType,
+        idNumber,
+        idPhoto
       };
       saveLocalCertificate(certData);
       saveCertificateToDb(certData);
     }
-  }, [showSummary, certCode, userName, userState, finalScorePercent, activeCertificateTab, certDate]);
+  }, [showSummary, certCode, userName, userState, finalScorePercent, activeCertificateTab, certDate, capturedPhoto, idType, idNumber, idPhoto]);
+
+  // Auto-upload ID to Google Drive if they pass and are logged in with Google
+  useEffect(() => {
+    if (showSummary && isPassed) {
+      const token = getAccessToken();
+      if (token && idPhoto && !driveIdUploaded && !driveIdUploading) {
+        setDriveIdUploading(true);
+        setDriveUploadError(null);
+        uploadIdToDrive(token, idType, certCode, idPhoto)
+          .then((res) => {
+            setDriveIdUploaded(true);
+            setDriveIdUploading(false);
+            logProctor(`[SUCCESS] Verified ID successfully stored in Google Drive folder 'ID' as ${idType}_${certCode}`);
+            
+            // Enrich and save certificate to DB with Google Drive links
+            const certData = {
+              certCode,
+              userName: userName.trim() || "INSPECTOR EXAMINER",
+              userState: userState || "Delhi NCR",
+              finalScorePercent,
+              activeTab: activeCertificateTab,
+              certDate,
+              status: "VERIFIED & ISSUED",
+              userPhoto: capturedPhoto,
+              idType,
+              idNumber,
+              idPhoto,
+              driveIdFileId: res.fileId,
+              driveIdViewUrl: res.webViewLink
+            };
+            saveLocalCertificate(certData);
+            saveCertificateToDb(certData);
+          })
+          .catch((err) => {
+            setDriveIdUploading(false);
+            setDriveUploadError(err.message);
+            logProctor(`[ERROR] Automatic Google Drive backup failed: ${err.message}`);
+          });
+      }
+    }
+  }, [showSummary, isPassed, idPhoto, idType, certCode, driveIdUploaded, driveIdUploading, userName, userState, finalScorePercent, activeCertificateTab, certDate, capturedPhoto, idNumber]);
 
   return (
     <div className="bg-zinc-950/50 border border-zinc-900 p-6 md:p-10 space-y-8 max-w-5xl mx-auto rounded-none relative overflow-hidden my-12" id="forensic-assessment-lab">
@@ -618,6 +840,145 @@ function TestYourKnowledge() {
       <div className="absolute right-0 top-0 w-64 h-64 bg-[#EF4444]/2 rounded-full blur-[80px] pointer-events-none" />
       <div className="absolute left-10 bottom-10 w-44 h-44 bg-[#F59E0B]/1 rounded-full blur-[80px] pointer-events-none" />
       <div className="absolute top-0 left-0 right-0 h-0.5 bg-[repeating-linear-gradient(90deg,#18181b,#18181b_10px,transparent_10px,transparent_20px)] opacity-30" />
+
+      {/* AI PROCTORING INSTRUCTIONS AND RULES POPUP MODAL */}
+      {showRulesModal && (
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 font-mono overflow-y-auto">
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-[#08080a] border border-zinc-800 p-6 md:p-8 max-w-2xl w-full text-left space-y-6 shadow-[0_0_60px_rgba(239,68,68,0.15)] my-8"
+          >
+            <div className="flex items-center gap-3 border-b border-zinc-900 pb-4">
+              <div className="p-2.5 bg-red-950/40 border border-red-500/50 text-red-500 rounded-none">
+                <ShieldAlert className="w-6 h-6 animate-pulse" />
+              </div>
+              <div>
+                <span className="text-[9px] text-red-400 font-black uppercase tracking-[0.2em] block">AI PROCTORING PROTOCOL REQUIRED</span>
+                <h3 className="text-lg font-black text-white uppercase font-display">
+                  EXAMINATION INTEGRITY INSTRUCTIONS
+                </h3>
+              </div>
+            </div>
+
+            <div className="text-[11px] text-zinc-400 leading-relaxed space-y-4">
+              <p>
+                To maintain the legal status and authentication validity of your 
+                <strong> NBC Compliance Credentials</strong>, this examination is subject to automated 
+                biometric telemetry and real-time vision proctoring checks.
+              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-[#0c0c10] border border-zinc-900 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="p-1.5 bg-zinc-900 border border-zinc-800 text-zinc-300 mt-0.5">
+                    <User className="w-4 h-4 text-red-500" />
+                  </div>
+                  <div>
+                    <h5 className="font-bold text-zinc-200 uppercase text-[10px] tracking-wide">UPRIGHT POSITIONING</h5>
+                    <p className="text-[10px] text-zinc-500 mt-0.5 leading-normal">
+                      Sit straight, center-frame. Your face must be fully exposed and clearly illuminated. Do not lay down or move out of the camera's sight.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="p-1.5 bg-zinc-900 border border-zinc-800 text-zinc-300 mt-0.5">
+                    <ShieldAlert className="w-4 h-4 text-amber-500" />
+                  </div>
+                  <div>
+                    <h5 className="font-bold text-zinc-200 uppercase text-[10px] tracking-wide">NO FACE OBSTRUCTION</h5>
+                    <p className="text-[10px] text-zinc-500 mt-0.5 leading-normal">
+                      Do not place hands, books, or devices over your face, mouth, or ears. Hands must remain clear of the webcam stream area.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="p-1.5 bg-zinc-900 border border-zinc-800 text-zinc-300 mt-0.5">
+                    <Eye className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h5 className="font-bold text-zinc-200 uppercase text-[10px] tracking-wide">SINGLE-EXAMINER RULE</h5>
+                    <p className="text-[10px] text-zinc-500 mt-0.5 leading-normal">
+                      Only one person is permitted in the webcam feed. Any multi-face detection or bystanders will trigger warning flags instantly.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="p-1.5 bg-zinc-900 border border-zinc-800 text-zinc-300 mt-0.5">
+                    <Activity className="w-4 h-4 text-red-500" />
+                  </div>
+                  <div>
+                    <h5 className="font-bold text-zinc-200 uppercase text-[10px] tracking-wide">ACTIVE SYSTEM FOCUS</h5>
+                    <p className="text-[10px] text-zinc-500 mt-0.5 leading-normal">
+                      Do not switch tabs, minimize windows, or lose focus. The AI tracking engine monitors screen focal changes continuously.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-red-950/20 border border-red-900/40 p-3.5 space-y-1 text-red-300">
+                <span className="font-bold uppercase tracking-wider text-[10px] flex items-center gap-1">
+                  <ShieldAlert className="w-3.5 h-3.5" /> PENALTY & TERMINATION POLICY
+                </span>
+                <p className="text-[10px] leading-normal opacity-90">
+                  You are allowed a maximum of <strong>10 Compliance Warnings</strong> before your secure session is auto-terminated, 
+                  permanently failing the exam and revoking your access. Keep your environment silent and properly aligned.
+                </p>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-zinc-900 space-y-4">
+              <label className="flex items-start gap-3 group cursor-pointer text-zinc-300 select-none">
+                <input
+                  type="checkbox"
+                  checked={rulesAccepted}
+                  onChange={(e) => setRulesAccepted(e.target.checked)}
+                  className="mt-1 accent-red-600 rounded-none w-4 h-4 border border-zinc-800 bg-zinc-950"
+                />
+                <span className="text-[10.5px] font-mono leading-relaxed group-hover:text-white transition-colors">
+                  I acknowledge the active **AI Proctoring Protocol**, verify that my face is centered and clearly visible in the webcam stream, and agree to follow these examination directives.
+                </span>
+              </label>
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!rulesAccepted) return;
+                    setShowRulesModal(false);
+                    setHasStarted(true);
+                    const activeStream = await requestPermissions();
+                    gamificationStore.triggerMission("PRELOADER");
+                    if (activeStream) {
+                      setTimeout(() => {
+                        const snap = capturePhoto();
+                        if (snap) setCapturedPhoto(snap);
+                      }, 1500);
+                    }
+                  }}
+                  disabled={!rulesAccepted}
+                  className={`flex-1 py-3 text-center text-xs font-black uppercase tracking-wider transition-all duration-300 cursor-pointer ${
+                    rulesAccepted
+                      ? "bg-[#EF4444] text-white border border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] hover:bg-red-500"
+                      : "bg-zinc-900 border border-zinc-800 text-zinc-500 cursor-not-allowed"
+                  }`}
+                >
+                  INITIALIZE FIRE AUDIT & START MISSION ➔
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowRulesModal(false)}
+                  className="px-5 py-3 bg-zinc-950 hover:bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
+                >
+                  ABORT SECURE SESSION
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {/* LOADING AND ERROR HANDLERS FOR DATABASE FETCH */}
       {isLoadingQuestions ? (
@@ -668,12 +1029,23 @@ function TestYourKnowledge() {
             </p>
           </div>
 
-          {/* User Identification Form */}
-          <div className="bg-[#0c0d12] border border-zinc-900/60 p-6 text-left space-y-4 max-w-md mx-auto">
-            <span className="font-mono text-[9px] text-[#EF4444] font-black uppercase tracking-[0.2em] block border-b border-zinc-900 pb-2">
-              EXAMINER IDENTIFICATION PROTOCOL
-            </span>
+          {/* User Identification & ID Verification Form */}
+          <div className="bg-[#0c0d12] border border-zinc-900/60 p-6 text-left space-y-5 max-w-md mx-auto">
+            <div className="flex justify-between items-center border-b border-zinc-900 pb-2">
+              <span className="font-mono text-[9px] text-[#EF4444] font-black uppercase tracking-[0.2em] block">
+                EXAMINER IDENTIFICATION & ID VERIFICATION
+              </span>
+              <button
+                type="button"
+                onClick={autofillDemoID}
+                className="text-[8px] font-mono text-amber-500 hover:text-amber-400 font-bold uppercase tracking-wider bg-amber-950/30 px-2 py-0.5 border border-amber-600/30 hover:border-amber-500 transition-colors cursor-pointer"
+              >
+                ⚡ AUTOFILL DEMO
+              </button>
+            </div>
+            
             <div className="space-y-3">
+              {/* Name */}
               <div>
                 <label className="block font-mono text-[9px] text-zinc-500 uppercase mb-1 font-bold">
                   Examiner Full Name:
@@ -692,6 +1064,8 @@ function TestYourKnowledge() {
                   </div>
                 )}
               </div>
+
+              {/* State */}
               <div>
                 <label className="block font-mono text-[9px] text-zinc-500 uppercase mb-1 font-bold">
                   Jurisdiction / State:
@@ -714,9 +1088,135 @@ function TestYourKnowledge() {
                   </div>
                 </div>
               </div>
+
+              {/* ID Type Selection (Tabs) */}
+              <div>
+                <label className="block font-mono text-[9px] text-zinc-500 uppercase mb-1.5 font-bold">
+                  ID Verification Type:
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIdType("aadhaar");
+                      setIdNumber("");
+                    }}
+                    className={`py-2 text-[10px] font-mono font-bold uppercase tracking-wider border transition-all cursor-pointer ${
+                      idType === "aadhaar"
+                        ? "bg-red-950/30 border-red-500/80 text-red-400"
+                        : "bg-zinc-950 border-zinc-900 text-zinc-600 hover:text-zinc-400"
+                    }`}
+                  >
+                    Aadhaar Card
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIdType("pan");
+                      setIdNumber("");
+                    }}
+                    className={`py-2 text-[10px] font-mono font-bold uppercase tracking-wider border transition-all cursor-pointer ${
+                      idType === "pan"
+                        ? "bg-red-950/30 border-red-500/80 text-red-400"
+                        : "bg-zinc-950 border-zinc-900 text-zinc-600 hover:text-zinc-400"
+                    }`}
+                  >
+                    PAN Card
+                  </button>
+                </div>
+              </div>
+
+              {/* ID Number Input with Validation Badge */}
+              <div>
+                <div className="flex justify-between items-center mb-1">
+                  <label className="block font-mono text-[9px] text-zinc-500 uppercase font-bold">
+                    {idType === "aadhaar" ? "Aadhaar Card Number (12 digits):" : "PAN Card Number (10 alphanumeric):"}
+                  </label>
+                  {idNumber && (
+                    <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 border uppercase ${
+                      isIdFormatValid()
+                        ? "bg-emerald-950/30 border-emerald-500/40 text-emerald-400"
+                        : "bg-red-950/30 border-red-500/40 text-red-400"
+                    }`}>
+                      {isIdFormatValid() ? "✓ FORMAT VALID" : "✗ FORMAT INVALID"}
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  value={idNumber}
+                  onChange={(e) => handleIdNumberChange(e.target.value)}
+                  placeholder={idType === "aadhaar" ? "e.g. 1234 - 5678 - 9012" : "e.g. ABCDE1234F"}
+                  className="w-full bg-zinc-950 border border-zinc-900 focus:border-[#EF4444] p-3 text-xs font-mono text-zinc-100 placeholder-zinc-800 focus:outline-none transition-colors"
+                />
+              </div>
+
+              {/* ID Card Scanned Upload Dropzone (Supports drag-and-drop & click select) */}
+              <div>
+                <label className="block font-mono text-[9px] text-zinc-500 uppercase mb-1 font-bold">
+                  Upload Scanned ID Copy:
+                </label>
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsIdDragging(true);
+                  }}
+                  onDragLeave={() => setIsIdDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsIdDragging(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                      handleIdPhotoFile(e.dataTransfer.files[0]);
+                    }
+                  }}
+                  onClick={() => document.getElementById("id-photo-input").click()}
+                  className={`border border-dashed p-4 text-center cursor-pointer transition-all flex flex-col items-center justify-center space-y-1.5 ${
+                    isIdDragging 
+                      ? "border-red-500 bg-red-950/10" 
+                      : idPhoto 
+                        ? "border-emerald-500/40 bg-emerald-950/5" 
+                        : "border-zinc-800 hover:border-zinc-700 bg-zinc-950"
+                  }`}
+                >
+                  <input
+                    id="id-photo-input"
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleIdPhotoFile(e.target.files[0]);
+                      }
+                    }}
+                    className="hidden"
+                  />
+                  
+                  {idPhoto ? (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-center gap-1.5 text-emerald-400 text-[10px] font-mono font-bold uppercase">
+                        <FileCheck className="w-4 h-4" />
+                        <span>ID ATTACHED SUCCESSFULLY</span>
+                      </div>
+                      <span className="text-[8px] text-zinc-500 font-mono block max-w-[240px] truncate mx-auto">
+                        {idPhotoName || "scanned_id.pdf"}
+                      </span>
+                    </div>
+                  ) : (
+                    <>
+                      <Upload className="w-5 h-5 text-zinc-500 mx-auto" />
+                      <div className="text-[10px] font-mono text-zinc-400 font-bold uppercase">
+                        Drag & Drop or Browse Scanned ID (Image / PDF)
+                      </div>
+                      <span className="text-[8px] text-zinc-600 font-mono">
+                        (Supports PNG, JPG, PDF up to 5MB)
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
-            <p className="text-[10px] text-zinc-600 font-mono leading-normal">
-              * Verification credentials are used to issue your forensic certificates. Both fields are required to unlock the exam system.
+
+            <p className="text-[9px] text-zinc-600 font-mono leading-normal border-t border-zinc-900 pt-2.5">
+              * Identification and scanned credentials are used strictly for legal certificate issuance and compliance reporting.
             </p>
 
             {/* Live Camera & Microphone Permission Pre-Check Box */}
@@ -762,22 +1262,32 @@ function TestYourKnowledge() {
             </div>
           </div>
 
-          <button
-            onClick={async () => {
-              if (!userName.trim() || !userState.trim()) return;
-              setHasStarted(true);
-              await requestPermissions();
-              gamificationStore.triggerMission("PRELOADER");
-            }}
-            disabled={!userName.trim() || !userState.trim()}
-            className={`w-full sm:w-auto px-8 py-4 font-mono text-xs font-black uppercase tracking-widest transition-all duration-300 rounded-none cursor-pointer ${
-              userName.trim() && userState.trim()
-                ? "bg-red-950/40 hover:bg-[#EF4444] border border-red-600/60 text-red-400 hover:text-white shadow-[0_0_20px_rgba(239,68,68,0.2)] hover:shadow-[0_0_40px_rgba(239,68,68,0.5)] active:scale-95"
-                : "bg-zinc-950 border border-zinc-900 text-zinc-700 cursor-not-allowed"
-            }`}
-          >
-            INITIALIZE FIRE AUDIT MISSION ➔
-          </button>
+          {(() => {
+            const canStartExam = userName.trim() && userState.trim() && idNumber.trim() && isIdFormatValid() && idPhoto;
+            return (
+              <div className="flex flex-col items-center space-y-2.5 w-full">
+                <button
+                  onClick={() => {
+                    if (!canStartExam) return;
+                    setShowRulesModal(true);
+                  }}
+                  disabled={!canStartExam}
+                  className={`w-full sm:w-auto px-8 py-4 font-mono text-xs font-black uppercase tracking-widest transition-all duration-300 rounded-none cursor-pointer ${
+                    canStartExam
+                      ? "bg-red-950/40 hover:bg-[#EF4444] border border-red-600/60 text-red-400 hover:text-white shadow-[0_0_20px_rgba(239,68,68,0.2)] hover:shadow-[0_0_40px_rgba(239,68,68,0.5)] active:scale-95"
+                      : "bg-zinc-950 border border-zinc-900 text-zinc-700 cursor-not-allowed"
+                  }`}
+                >
+                  INITIALIZE FIRE AUDIT MISSION ➔
+                </button>
+                {!canStartExam && (
+                  <span className="text-[9px] font-mono text-zinc-600 uppercase tracking-wider text-center max-w-sm leading-relaxed">
+                    Requirement Pending: Ensure Name, Jurisdiction, valid {idType === "aadhaar" ? "12-digit Aadhaar" : "10-char PAN"} format, and ID Scanned Card image are set. (Click "Autofill Demo" to skip)
+                  </span>
+                )}
+              </div>
+            );
+          })()}
         </motion.div>
       ) : !showSummary ? (
         /* ACTIVE QUESTION SCREEN */
@@ -795,7 +1305,7 @@ function TestYourKnowledge() {
               <motion.div
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                className="bg-[#0c0808] border-2 border-red-600 p-8 max-w-lg w-full text-center space-y-6 shadow-[0_0_50px_rgba(239,68,68,0.4)]"
+                className="bg-[#0c0808] border-2 border-red-600 p-6 sm:p-8 max-w-lg w-full text-center space-y-6 shadow-[0_0_50px_rgba(239,68,68,0.4)]"
               >
                 <div className="inline-flex p-4 bg-red-950 border border-red-500 text-red-500 rounded-none animate-bounce">
                   <AlertOctagon className="w-12 h-12" />
@@ -876,7 +1386,7 @@ function TestYourKnowledge() {
             </div>
 
             {/* 20-step track */}
-            <div className="grid grid-cols-10 sm:grid-cols-20 gap-1 pt-1">
+            <div className="grid gap-1 pt-1" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(24px, 1fr))" }}>
               {quizQuestions.map((q, idx) => {
                 const attempted = attemptedAnswers[idx];
                 const isCurrent = idx === activeScenarioIdx;
@@ -1349,7 +1859,7 @@ function TestYourKnowledge() {
           </div>
 
           {/* Core Score Indicators */}
-          <div className="bg-[#0b0b0d] border border-zinc-900 p-6 grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+          <div className="bg-[#0b0b0d] border border-zinc-900 p-6 grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
             {/* Stats */}
             <div className="text-left space-y-3 md:col-span-2">
               <span className="text-[9px] text-zinc-500 uppercase block font-mono">AUDIT METRIC LEDGER</span>
@@ -1373,6 +1883,93 @@ function TestYourKnowledge() {
                   </p>
                 )}
               </div>
+            </div>
+
+            {/* Proctor Biometric Snapshot Column */}
+            <div className="flex flex-col items-center justify-center md:border-l border-zinc-900 py-4 space-y-2">
+              <span className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest block font-bold">IDENTITY SNAPSHOT</span>
+              <div className="relative w-24 h-28 bg-zinc-950 border-2 border-zinc-900 overflow-hidden shadow-inner">
+                {capturedPhoto ? (
+                  <img 
+                    src={capturedPhoto} 
+                    alt="Proctor Snapshot" 
+                    className="w-full h-full object-cover" 
+                  />
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center text-zinc-700 bg-zinc-950">
+                    <User className="w-8 h-8" />
+                    <span className="text-[7px] font-mono text-zinc-600 mt-1 uppercase">NOT CAPTURED</span>
+                  </div>
+                )}
+                {capturedPhoto && (
+                  <div className="absolute inset-x-0 bottom-0 bg-emerald-950/80 text-[7px] text-emerald-400 font-bold uppercase tracking-wider text-center py-0.5 border-t border-emerald-500/30">
+                    VERIFIED
+                  </div>
+                )}
+              </div>
+              {capturedPhoto ? (
+                <div className="flex flex-col items-center">
+                  <span className="text-[8px] font-mono text-zinc-400 uppercase tracking-wider block text-center mt-1">
+                    REF: {certCode.split("-").pop()}
+                  </span>
+                  <div className="flex flex-col items-center space-y-1 mt-1">
+                    <button
+                      onClick={() => {
+                        const snap = capturePhoto();
+                        if (snap) {
+                          setCapturedPhoto(snap);
+                          logProctor("[MANUAL ACTION] Identity snapshot refreshed by user.");
+                        } else {
+                          logProctor("[WARNING] Live camera is not active in this view. Please use the file upload alternative.");
+                        }
+                      }}
+                      className="text-[8px] font-mono text-amber-500 hover:text-amber-400 hover:underline uppercase font-bold tracking-wider cursor-pointer"
+                    >
+                      [Retake Snapshot]
+                    </button>
+                    <button
+                      onClick={() => document.getElementById("summary-photo-upload")?.click()}
+                      className="text-[8px] font-mono text-sky-400 hover:text-sky-300 hover:underline uppercase font-bold tracking-wider cursor-pointer"
+                    >
+                      [Upload Photo File]
+                    </button>
+                    <input
+                      id="summary-photo-upload"
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        if (e.target.files && e.target.files[0]) {
+                          handlePhotoFile(e.target.files[0]);
+                        }
+                      }}
+                      className="hidden"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center">
+                  <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-wider block text-center mt-1 mb-1">
+                    NO PHOTO RECORD
+                  </span>
+                  <button
+                    onClick={() => document.getElementById("summary-photo-upload-empty")?.click()}
+                    className="text-[8px] font-mono text-red-400 hover:text-red-300 hover:underline uppercase font-bold tracking-wider cursor-pointer"
+                  >
+                    [UPLOAD STILL PHOTO]
+                  </button>
+                  <input
+                    id="summary-photo-upload-empty"
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        handlePhotoFile(e.target.files[0]);
+                      }
+                    }}
+                    className="hidden"
+                  />
+                </div>
+              )}
             </div>
 
             {/* Circular Percentage Gauges */}
@@ -1534,6 +2131,8 @@ function TestYourKnowledge() {
                 }
               `}} />
 
+
+
               {/* PDF Print & Direct Download Action Banner */}
               <div className="bg-amber-950/20 border border-amber-800/60 p-4 max-w-2xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 font-mono text-xs">
                 <div className="text-left space-y-1">
@@ -1596,6 +2195,21 @@ function TestYourKnowledge() {
                       <div className="absolute top-4 right-4 text-[7px] text-zinc-500 font-mono uppercase bg-zinc-950/80 px-2 py-0.5 border border-zinc-900">
                         ID: {certCode}
                       </div>
+
+                      {/* Proctor Verified Face Identity (Top Left Card) */}
+                      {capturedPhoto && (
+                        <div className="absolute top-4 left-4 z-20 flex flex-col items-center bg-zinc-950/90 border border-zinc-800 p-1 shadow-md w-14">
+                          <div className="w-11 h-14 overflow-hidden bg-black border border-zinc-900 relative">
+                            <img src={capturedPhoto} alt="Examinee ID" className="w-full h-full object-cover animate-fade-in" />
+                            <div className="absolute inset-x-0 bottom-0 bg-emerald-950/80 text-[4px] text-emerald-400 font-bold uppercase tracking-wider text-center py-0.5 border-t border-emerald-500/30 leading-none">
+                              VERIFIED
+                            </div>
+                          </div>
+                          <span className="text-[4px] text-zinc-500 mt-1 uppercase font-mono tracking-widest text-center leading-none">
+                            PROCTOR ID
+                          </span>
+                        </div>
+                      )}
 
                       <div className="space-y-6 relative z-10">
                         {/* Built to Break Seal */}
@@ -1711,6 +2325,21 @@ function TestYourKnowledge() {
                       <div className="absolute top-4 right-4 text-[7px] text-zinc-500 font-mono uppercase bg-zinc-950/80 px-2 py-0.5 border border-zinc-900">
                         ID: {certCode}-SHOW
                       </div>
+
+                      {/* Proctor Verified Face Identity (Top Left Card) */}
+                      {capturedPhoto && (
+                        <div className="absolute top-4 left-4 z-20 flex flex-col items-center bg-zinc-950/90 border border-zinc-800 p-1 shadow-md w-14">
+                          <div className="w-11 h-14 overflow-hidden bg-black border border-zinc-900 relative">
+                            <img src={capturedPhoto} alt="Examinee ID" className="w-full h-full object-cover animate-fade-in" />
+                            <div className="absolute inset-x-0 bottom-0 bg-red-950/80 text-[4px] text-red-400 font-bold uppercase tracking-wider text-center py-0.5 border-t border-red-500/30 leading-none">
+                              VERIFIED
+                            </div>
+                          </div>
+                          <span className="text-[4px] text-zinc-500 mt-1 uppercase font-mono tracking-widest text-center leading-none">
+                            PROCTOR ID
+                          </span>
+                        </div>
+                      )}
 
                       <div className="space-y-6 relative z-10">
                         {/* Built to Break Seal */}
