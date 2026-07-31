@@ -57,6 +57,7 @@ import {
   printCertificateImage 
 } from "../utils/certificateGenerator";
 import { FALLBACK_QUESTIONS } from "../questionsData";
+import ErrorScreen from "./ErrorScreen";
 
 const INDIAN_STATES = [
   "Andaman and Nicobar Islands",
@@ -1154,21 +1155,12 @@ function TestYourKnowledge() {
           </p>
         </div>
       ) : questionsError ? (
-        <div className="flex flex-col items-center justify-center py-16 space-y-6 font-mono text-center max-w-md mx-auto">
-          <div className="p-3 bg-red-950/20 border border-red-500/30 text-red-500 rounded-none shadow-inner">
-            <ShieldAlert className="w-8 h-8 animate-pulse" />
-          </div>
-          <div className="space-y-2">
-            <h4 className="text-xs font-black text-white uppercase tracking-wider">DATABASE ACCESS ERROR</h4>
-            <p className="text-[10px] text-zinc-500 leading-relaxed font-light">{questionsError}</p>
-          </div>
-          <button
-            onClick={() => initializeQuiz()}
-            className="px-5 py-2.5 bg-red-950/40 hover:bg-[#EF4444] border border-red-600/60 text-red-400 hover:text-white text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
-          >
-            RETRY SECURE DATABASE CONNECTION
-          </button>
-        </div>
+        <ErrorScreen 
+          type="503"
+          message={questionsError}
+          onRetry={() => initializeQuiz()}
+          onNavigateHome={() => window.location.href = "/"}
+        />
       ) : !hasStarted ? (
         <motion.div 
           initial={{ opacity: 0, y: 15 }}
