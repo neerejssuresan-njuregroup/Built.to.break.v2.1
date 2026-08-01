@@ -8,6 +8,7 @@ class AudioEngine {
     this.ctx = null;
     this.isPlaying = false;
     this.isMuted = false;
+    this.listeners = new Set();
 
     // Nodes
     this.masterGain = null;
@@ -26,6 +27,19 @@ class AudioEngine {
     this.noiseInterval = null;
   }
 
+  subscribe(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  notifyListeners() {
+    this.listeners.forEach(listener => {
+      try {
+        listener({ isPlaying: this.isPlaying, isMuted: this.isMuted });
+      } catch (e) {}
+    });
+  }
+
   init() {
     if (this.ctx) return;
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -38,116 +52,119 @@ class AudioEngine {
 
   start() {
     this.init();
-    if (!this.ctx || this.isPlaying) return;
+    if (!this.ctx) return;
 
     if (this.ctx.state === "suspended") {
       this.ctx.resume();
     }
 
-    this.isPlaying = true;
+    if (!this.isPlaying) {
+      this.isPlaying = true;
 
-    // Master Gain
-    this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.setValueAtTime(0.0, this.ctx.currentTime);
-    // Smooth ramp-in
-    const targetVolume = this.isMuted ? 0.0 : 0.6;
-    this.masterGain.gain.linearRampToValueAtTime(targetVolume, this.ctx.currentTime + 1.5);
-    this.masterGain.connect(this.ctx.destination);
+      // Master Gain
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.gain.setValueAtTime(0.0, this.ctx.currentTime);
+      // Smooth ramp-in
+      const targetVolume = this.isMuted ? 0.0 : 0.6;
+      this.masterGain.gain.linearRampToValueAtTime(targetVolume, this.ctx.currentTime + 1.5);
+      this.masterGain.connect(this.ctx.destination);
 
-    // 1. Deep Rumble / Ominous Drone (38Hz)
-    this.rumbleOsc = this.ctx.createOscillator();
-    this.rumbleOsc.type = "sawtooth";
-    this.rumbleOsc.frequency.setValueAtTime(38, this.ctx.currentTime);
-    
-    this.rumbleGain = this.ctx.createGain();
-    this.rumbleGain.gain.setValueAtTime(0.2, this.ctx.currentTime);
+      // 1. Deep Rumble / Ominous Drone (38Hz)
+      this.rumbleOsc = this.ctx.createOscillator();
+      this.rumbleOsc.type = "sawtooth";
+      this.rumbleOsc.frequency.setValueAtTime(38, this.ctx.currentTime);
+      
+      this.rumbleGain = this.ctx.createGain();
+      this.rumbleGain.gain.setValueAtTime(0.2, this.ctx.currentTime);
 
-    // Filter to keep only the deep low-end rumble
-    const rumbleFilter = this.ctx.createBiquadFilter();
-    rumbleFilter.type = "lowpass";
-    rumbleFilter.frequency.setValueAtTime(65, this.ctx.currentTime);
-    rumbleFilter.Q.setValueAtTime(3.0, this.ctx.currentTime);
+      // Filter to keep only the deep low-end rumble
+      const rumbleFilter = this.ctx.createBiquadFilter();
+      rumbleFilter.type = "lowpass";
+      rumbleFilter.frequency.setValueAtTime(65, this.ctx.currentTime);
+      rumbleFilter.Q.setValueAtTime(3.0, this.ctx.currentTime);
 
-    // Slow frequency LFO for unstable pressure feel
-    const rumbleLFO = this.ctx.createOscillator();
-    rumbleLFO.type = "sine";
-    rumbleLFO.frequency.setValueAtTime(0.2, this.ctx.currentTime); // 0.2Hz (5 seconds cycle)
-    const rumbleLFOGain = this.ctx.createGain();
-    rumbleLFOGain.gain.setValueAtTime(5, this.ctx.currentTime);
+      // Slow frequency LFO for unstable pressure feel
+      const rumbleLFO = this.ctx.createOscillator();
+      rumbleLFO.type = "sine";
+      rumbleLFO.frequency.setValueAtTime(0.2, this.ctx.currentTime); // 0.2Hz (5 seconds cycle)
+      const rumbleLFOGain = this.ctx.createGain();
+      rumbleLFOGain.gain.setValueAtTime(5, this.ctx.currentTime);
 
-    rumbleLFO.connect(rumbleLFOGain);
-    rumbleLFOGain.connect(this.rumbleOsc.frequency);
-    
-    this.rumbleOsc.connect(rumbleFilter);
-    rumbleFilter.connect(this.rumbleGain);
-    this.rumbleGain.connect(this.masterGain);
+      rumbleLFO.connect(rumbleLFOGain);
+      rumbleLFOGain.connect(this.rumbleOsc.frequency);
+      
+      this.rumbleOsc.connect(rumbleFilter);
+      rumbleFilter.connect(this.rumbleGain);
+      this.rumbleGain.connect(this.masterGain);
 
-    rumbleLFO.start();
-    this.rumbleOsc.start();
+      rumbleLFO.start();
+      this.rumbleOsc.start();
 
-    // 2. Synthesized Heartbeat / Tension Ticks (pulsing low-pass filter thump)
-    this.heartbeatInterval = setInterval(() => {
-      if (!this.ctx || !this.masterGain) return;
-      try {
-        const time = this.ctx.currentTime;
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        const filter = this.ctx.createBiquadFilter();
+      // 2. Synthesized Heartbeat / Tension Ticks (pulsing low-pass filter thump)
+      this.heartbeatInterval = setInterval(() => {
+        if (!this.ctx || !this.masterGain) return;
+        try {
+          const time = this.ctx.currentTime;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          const filter = this.ctx.createBiquadFilter();
 
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(55, time); // Very low sub-bass kick
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(55, time); // Very low sub-bass kick
 
-        filter.type = "lowpass";
-        filter.frequency.setValueAtTime(100, time);
+          filter.type = "lowpass";
+          filter.frequency.setValueAtTime(100, time);
 
-        gain.gain.setValueAtTime(0.0, time);
-        gain.gain.linearRampToValueAtTime(0.7, time + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, time + 0.4); // 400ms decay
+          gain.gain.setValueAtTime(0.0, time);
+          gain.gain.linearRampToValueAtTime(0.7, time + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, time + 0.4); // 400ms decay
 
-        osc.connect(filter);
-        filter.connect(gain);
-        gain.connect(this.masterGain);
+          osc.connect(filter);
+          filter.connect(gain);
+          gain.connect(this.masterGain);
 
-        osc.start(time);
-        osc.stop(time + 0.5);
-      } catch (e) {
-        // Safe catch
-      }
-    }, 600); // 100 BPM heart thump
+          osc.start(time);
+          osc.stop(time + 0.5);
+        } catch (e) {
+          // Safe catch
+        }
+      }, 600); // 100 BPM heart thump
 
-    // 3. Distant Warning Siren (oscillating high pitch, low volume)
-    this.sirenOsc = this.ctx.createOscillator();
-    this.sirenOsc.type = "triangle";
-    this.sirenOsc.frequency.setValueAtTime(450, this.ctx.currentTime); // base siren frequency
+      // 3. Distant Warning Siren (oscillating high pitch, low volume)
+      this.sirenOsc = this.ctx.createOscillator();
+      this.sirenOsc.type = "triangle";
+      this.sirenOsc.frequency.setValueAtTime(450, this.ctx.currentTime); // base siren frequency
 
-    this.sirenGain = this.ctx.createGain();
-    this.sirenGain.gain.setValueAtTime(0.02, this.ctx.currentTime); // keep it background/distant
+      this.sirenGain = this.ctx.createGain();
+      this.sirenGain.gain.setValueAtTime(0.02, this.ctx.currentTime); // keep it background/distant
 
-    this.sirenLFO = this.ctx.createOscillator();
-    this.sirenLFO.type = "sine";
-    this.sirenLFO.frequency.setValueAtTime(0.3, this.ctx.currentTime); // slow wave sweep (3.3s cycle)
-    
-    const sirenLFOGain = this.ctx.createGain();
-    sirenLFOGain.gain.setValueAtTime(60, this.ctx.currentTime); // warble up and down by 60Hz
+      this.sirenLFO = this.ctx.createOscillator();
+      this.sirenLFO.type = "sine";
+      this.sirenLFO.frequency.setValueAtTime(0.3, this.ctx.currentTime); // slow wave sweep (3.3s cycle)
+      
+      const sirenLFOGain = this.ctx.createGain();
+      sirenLFOGain.gain.setValueAtTime(60, this.ctx.currentTime); // warble up and down by 60Hz
 
-    this.sirenLFO.connect(sirenLFOGain);
-    sirenLFOGain.connect(this.sirenOsc.frequency);
+      this.sirenLFO.connect(sirenLFOGain);
+      sirenLFOGain.connect(this.sirenOsc.frequency);
 
-    // Muffle the siren to sound distant
-    const sirenFilter = this.ctx.createBiquadFilter();
-    sirenFilter.type = "bandpass";
-    sirenFilter.frequency.setValueAtTime(500, this.ctx.currentTime);
-    sirenFilter.Q.setValueAtTime(1.0, this.ctx.currentTime);
+      // Muffle the siren to sound distant
+      const sirenFilter = this.ctx.createBiquadFilter();
+      sirenFilter.type = "bandpass";
+      sirenFilter.frequency.setValueAtTime(500, this.ctx.currentTime);
+      sirenFilter.Q.setValueAtTime(1.0, this.ctx.currentTime);
 
-    this.sirenOsc.connect(sirenFilter);
-    sirenFilter.connect(this.sirenGain);
-    this.sirenGain.connect(this.masterGain);
+      this.sirenOsc.connect(sirenFilter);
+      sirenFilter.connect(this.sirenGain);
+      this.sirenGain.connect(this.masterGain);
 
-    this.sirenLFO.start();
-    this.sirenOsc.start();
+      this.sirenLFO.start();
+      this.sirenOsc.start();
 
-    // 4. Procedural Crackling Fire Embers
-    this.startCrackling();
+      // 4. Procedural Crackling Fire Embers
+      this.startCrackling();
+    }
+    this.notifyListeners();
   }
 
   startCrackling() {
@@ -193,23 +210,25 @@ class AudioEngine {
   }
 
   stop() {
-    if (!this.isPlaying) return;
-    this.isPlaying = false;
+    if (this.isPlaying) {
+      this.isPlaying = false;
 
-    if (this.masterGain && this.ctx) {
-      const time = this.ctx.currentTime;
-      this.masterGain.gain.linearRampToValueAtTime(0.0, time + 0.5);
-      setTimeout(() => {
-        try {
-          if (this.rumbleOsc) this.rumbleOsc.stop();
-          if (this.sirenOsc) this.sirenOsc.stop();
-          if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
-          if (this.noiseInterval) clearInterval(this.noiseInterval);
-        } catch (e) {
-          // ignore already stopped
-        }
-      }, 600);
+      if (this.masterGain && this.ctx) {
+        const time = this.ctx.currentTime;
+        this.masterGain.gain.linearRampToValueAtTime(0.0, time + 0.5);
+        setTimeout(() => {
+          try {
+            if (this.rumbleOsc) this.rumbleOsc.stop();
+            if (this.sirenOsc) this.sirenOsc.stop();
+            if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+            if (this.noiseInterval) clearInterval(this.noiseInterval);
+          } catch (e) {
+            // ignore already stopped
+          }
+        }, 600);
+      }
     }
+    this.notifyListeners();
   }
 
   setTensionLevel(level) {
@@ -239,6 +258,11 @@ class AudioEngine {
       const targetVolume = muted ? 0.0 : 0.6;
       this.masterGain.gain.linearRampToValueAtTime(targetVolume, time + 0.3);
     }
+    this.notifyListeners();
+  }
+
+  toggleMute() {
+    this.setMuted(!this.isMuted);
   }
 
   getIsMuted() {

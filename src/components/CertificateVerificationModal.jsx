@@ -8,6 +8,7 @@ import { motion } from "motion/react";
 import { 
   ShieldCheck, 
   ShieldAlert,
+  AlertTriangle,
   Search, 
   X, 
   CheckCircle2, 
@@ -228,30 +229,58 @@ function CertificateVerificationModal({ isOpen, onClose, initialCertCode = "" })
                     {/* Right Panel: All Details */}
                     <div className="flex-grow space-y-6">
                       {/* Status Banner */}
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-900 pb-6">
-                        <div className="flex items-center gap-3">
-                          <div className="p-3 bg-emerald-950/60 border border-emerald-500/40 rounded-none text-emerald-400">
-                            <CheckCircle2 className="w-7 h-7" />
+                      {searchResult.finalScorePercent < 85 || searchResult.status?.includes("FAILED") || searchResult.status?.includes("INVALID") ? (
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-red-900 pb-6 bg-red-950/20 p-4 border border-red-800">
+                          <div className="flex items-center gap-3">
+                            <div className="p-3 bg-red-950 border border-red-500 rounded-none text-red-500">
+                              <AlertTriangle className="w-7 h-7" />
+                            </div>
+                            <div>
+                              <span className="text-[9px] font-mono font-black uppercase tracking-[0.25em] text-red-500 block">
+                                STATUS: INVALID / REJECTED (&lt;85% SCORE THRESHOLD)
+                              </span>
+                              <h3 className="text-xl font-black text-red-400 uppercase tracking-tight font-display">
+                                EXAM FAILED — NO VALID CERTIFICATE ISSUED
+                              </h3>
+                              <p className="text-xs text-red-300 font-mono mt-1">
+                                Candidate scored {searchResult.finalScorePercent}% which is below the required 85% compliance threshold.
+                              </p>
+                            </div>
                           </div>
-                          <div>
-                            <span className="text-[9px] font-mono font-black uppercase tracking-[0.25em] text-emerald-400 block">
-                              STATUS: AUTHENTICATED & VALID
-                            </span>
-                            <h3 className="text-xl font-black text-zinc-100 uppercase tracking-tight font-display">
-                              {searchResult.activeTab === "nbc" 
-                                ? "NBC COMPLIANCE FORENSIC EXAM" 
-                                : "HONORARY PUBLIC SAFETY ENVOY"}
-                            </h3>
-                          </div>
-                        </div>
 
-                        <div className="text-left sm:text-right font-mono bg-emerald-950/30 border border-emerald-900/50 p-3">
-                          <span className="text-[9px] text-zinc-500 uppercase block font-bold">CERTIFICATE ID</span>
-                          <span className="text-base font-black text-emerald-400 tracking-wider">
-                            {searchResult.certCode}
-                          </span>
+                          <div className="text-left sm:text-right font-mono bg-red-950/50 border border-red-900 p-3">
+                            <span className="text-[9px] text-red-400 uppercase block font-bold">CERTIFICATE ID</span>
+                            <span className="text-base font-black text-red-500 tracking-wider">
+                              {searchResult.certCode}
+                            </span>
+                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-900 pb-6">
+                          <div className="flex items-center gap-3">
+                            <div className="p-3 bg-emerald-950/60 border border-emerald-500/40 rounded-none text-emerald-400">
+                              <CheckCircle2 className="w-7 h-7" />
+                            </div>
+                            <div>
+                              <span className="text-[9px] font-mono font-black uppercase tracking-[0.25em] text-emerald-400 block">
+                                STATUS: AUTHENTICATED & VALID
+                              </span>
+                              <h3 className="text-xl font-black text-zinc-100 uppercase tracking-tight font-display">
+                                {searchResult.activeTab === "nbc" 
+                                  ? "NBC COMPLIANCE FORENSIC EXAM" 
+                                  : "HONORARY PUBLIC SAFETY ENVOY"}
+                              </h3>
+                            </div>
+                          </div>
+
+                          <div className="text-left sm:text-right font-mono bg-emerald-950/30 border border-emerald-900/50 p-3">
+                            <span className="text-[9px] text-zinc-500 uppercase block font-bold">CERTIFICATE ID</span>
+                            <span className="text-base font-black text-emerald-400 tracking-wider">
+                              {searchResult.certCode}
+                            </span>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Certificate Recipient Details Grid */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 bg-black p-4 border border-zinc-900">
@@ -291,9 +320,9 @@ function CertificateVerificationModal({ isOpen, onClose, initialCertCode = "" })
 
                         <div>
                           <span className="text-[9px] font-mono text-zinc-500 uppercase block font-bold">EVALUATION SCORE</span>
-                          <span className="text-sm font-black text-emerald-400 tracking-wide flex items-center gap-1.5 mt-1 font-mono">
-                            <Award className="w-4 h-4 text-emerald-400" />
-                            {searchResult.finalScorePercent}% COMPLIANT
+                          <span className={`text-sm font-black tracking-wide flex items-center gap-1.5 mt-1 font-mono ${searchResult.finalScorePercent >= 85 ? 'text-emerald-400' : 'text-red-500'}`}>
+                            <Award className={`w-4 h-4 ${searchResult.finalScorePercent >= 85 ? 'text-emerald-400' : 'text-red-500'}`} />
+                            {searchResult.finalScorePercent}% {searchResult.finalScorePercent >= 85 ? 'COMPLIANT' : 'FAILED (<85%)'}
                           </span>
                         </div>
 

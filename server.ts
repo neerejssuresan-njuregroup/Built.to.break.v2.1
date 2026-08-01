@@ -3,12 +3,23 @@ import path from "path";
 import crypto from "crypto";
 import { Server as SocketIOServer } from "socket.io";
 import { createServer as createViteServer } from "vite";
+import { GoogleGenAI, Type } from "@google/genai";
 import { db } from "./src/db/index.ts";
 import { users, certificates, questions, admins, ongoingSessions } from "./src/db/schema.ts";
 import { eq, sql } from "drizzle-orm";
 import { adminAuth } from "./src/lib/firebase-admin.ts";
 import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
 import { FALLBACK_QUESTIONS } from "./src/questionsData.js";
+
+// Initialize Gemini Client
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY || "",
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
+    }
+  }
+});
 
 // Hashing algorithms for ID & Passwords (case-sensitive)
 function hashAdminId(adminId: string): string {
@@ -78,6 +89,35 @@ async function startServer() {
     }
   } catch (err: any) {
     console.error("[DB] Failed to seed admin user:", err);
+  }
+
+  // Auto-seed 500 unique questions into DB if question count is low
+  try {
+    const existingCount = await db.select({ count: sql`count(*)` }).from(questions);
+    const countNum = parseInt((existingCount[0] as any)?.count || "0", 10);
+    if (countNum < 100) {
+      console.log(`[DB] Current question count is ${countNum}. Seeding 500 unique questions from bank...`);
+      for (const q of FALLBACK_QUESTIONS) {
+        await db.insert(questions).values({
+          questionId: q.id,
+          title: q.title,
+          type: q.type,
+          location: q.location || "Custom Location",
+          description: q.description,
+          difficulty: q.difficulty || "MEDIUM",
+          points: q.points || 10,
+          options: q.options,
+          correctId: q.correctId,
+          nbcClauses: q.nbcClauses,
+          bnsSection: q.bnsSection,
+          hazardLevel: q.hazardLevel || "HIGH",
+          fact: q.fact || "",
+        }).onConflictDoNothing();
+      }
+      console.log("[DB] 500 unique questions successfully seeded.");
+    }
+  } catch (err: any) {
+    console.warn("[DB] Question auto-seed note:", err?.message);
   }
 
   // Body parsers with increased limit for base64 photo uploads
@@ -272,58 +312,68 @@ async function startServer() {
 
       const existing = await db.select().from(ongoingSessions).where(eq(ongoingSessions.sessionCode, sessionCode)).limit(1);
 
-      let updatedRecord;
-      if (existing.length === 0) {
-        const inserted = await db.insert(ongoingSessions).values({
+      let serverStatus = "ongoing";
+      let serverFlags = 0;
+      let serverLogs: any[] = [];
+      let prevQuestionIdx = 0;
+      let prevScore = 0;
+      let prevPhoto = null;
+
+      if (existing.length > 0) {
+        serverStatus = existing[0].status;
+        serverFlags = existing[0].flags ?? 0;
+        serverLogs = (existing[0].proctorLogs as any[]) || [];
+        prevQuestionIdx = existing[0].currentQuestionIndex ?? 0;
+        prevScore = existing[0].scorePercent ?? 0;
+        prevPhoto = existing[0].userPhoto;
+      }
+
+      const clientLogs = proctorLogs || [];
+      const manualServerLogs = serverLogs.filter((log: any) => log.type === "MANUAL" || log.action === "FLAG" || log.action === "UNFLAG");
+      
+      const mergedLogs = [...clientLogs];
+      for (const mLog of manualServerLogs) {
+        const alreadyExists = mergedLogs.some((l: any) => l.message === mLog.message && l.timestamp === mLog.timestamp);
+        if (!alreadyExists) {
+          mergedLogs.push(mLog);
+        }
+      }
+
+      // Allow explicit reset if status is ongoing (re-attempt) or if flags is explicitly 0
+      const isReattempt = status === "ongoing" && flags === 0;
+      const finalStatus = isReattempt ? "ongoing" : ((serverStatus === "disqualified" && status !== "completed") ? "disqualified" : (status || "ongoing"));
+      const finalFlags = isReattempt ? 0 : (flags !== undefined ? flags : serverFlags);
+
+      const result = await db.insert(ongoingSessions)
+        .values({
           sessionCode,
           userName,
           userState: userState || "Delhi NCR",
-          status: status || "ongoing",
-          proctorLogs: proctorLogs || [],
-          flags: flags || 0,
-          currentQuestionIndex: currentQuestionIndex || 0,
-          scorePercent: scorePercent || 0,
-          userPhoto: userPhoto || null,
+          status: finalStatus,
+          proctorLogs: mergedLogs,
+          flags: finalFlags,
+          currentQuestionIndex: currentQuestionIndex ?? prevQuestionIdx,
+          scorePercent: scorePercent ?? prevScore,
+          userPhoto: userPhoto || prevPhoto || null,
           updatedAt: new Date(),
-        }).returning();
-        updatedRecord = inserted[0];
-      } else {
-        const serverStatus = existing[0].status;
-        const serverFlags = existing[0].flags ?? 0;
-        const serverLogs = existing[0].proctorLogs as any[] || [];
-
-        const clientLogs = proctorLogs || [];
-        const manualServerLogs = serverLogs.filter((log: any) => log.type === "MANUAL" || log.action === "FLAG" || log.action === "UNFLAG");
-        
-        const mergedLogs = [...clientLogs];
-        for (const mLog of manualServerLogs) {
-          const alreadyExists = mergedLogs.some((l: any) => l.message === mLog.message && l.timestamp === mLog.timestamp);
-          if (!alreadyExists) {
-            mergedLogs.push(mLog);
-          }
-        }
-        
-        const finalStatus = (serverStatus === "disqualified" && status !== "completed") ? "disqualified" : status;
-        const finalFlags = Math.max(serverFlags, flags || 0);
-
-        const updated = await db.update(ongoingSessions)
-          .set({
+        })
+        .onConflictDoUpdate({
+          target: ongoingSessions.sessionCode,
+          set: {
             userName,
             userState: userState || "Delhi NCR",
             status: finalStatus,
             proctorLogs: mergedLogs,
             flags: finalFlags,
-            currentQuestionIndex: currentQuestionIndex ?? existing[0].currentQuestionIndex,
-            scorePercent: scorePercent ?? existing[0].scorePercent,
-            userPhoto: userPhoto || existing[0].userPhoto,
+            currentQuestionIndex: currentQuestionIndex ?? prevQuestionIdx,
+            scorePercent: scorePercent ?? prevScore,
+            userPhoto: userPhoto || prevPhoto || null,
             updatedAt: new Date(),
-          })
-          .where(eq(ongoingSessions.sessionCode, sessionCode))
-          .returning();
-        updatedRecord = updated[0];
-      }
+          }
+        })
+        .returning();
 
-      res.json({ success: true, session: updatedRecord });
+      res.json({ success: true, session: result[0] });
     } catch (error: any) {
       console.error("Session sync error:", error);
       res.status(500).json({ error: "Failed to sync session", details: error.message });
@@ -473,25 +523,53 @@ async function startServer() {
     }
   });
 
-  // API Route: Get 20 Random Questions from Database
+  // API Route: Get 20 Random UNIQUE Questions from Database or Fallback
   app.get("/api/questions", async (req, res) => {
     try {
-      let randomQuestions: any[] = [];
+      let candidatePool: any[] = [];
       try {
-        randomQuestions = await db.select()
+        candidatePool = await db.select()
           .from(questions)
           .orderBy(sql`random()`)
-          .limit(20);
+          .limit(80);
       } catch (dbError: any) {
         console.warn("[DB] Failed to query questions table, serving fallback question bank:", dbError?.message);
       }
 
-      if (!randomQuestions || randomQuestions.length === 0) {
-        return res.json(FALLBACK_QUESTIONS);
+      if (!candidatePool || candidatePool.length === 0) {
+        candidatePool = FALLBACK_QUESTIONS;
       }
 
-      const mapped = randomQuestions.map((q) => ({
-        id: q.questionId, // map questionId to id for frontend compatibility
+      // Strict deduplication by title and description
+      const uniqueList: any[] = [];
+      const seenKeys = new Set<string>();
+
+      // Shuffle candidate pool
+      const shuffled = [...candidatePool].sort(() => Math.random() - 0.5);
+
+      for (const q of shuffled) {
+        const key = `${q.title || ""}_${q.description || ""}`.trim().toLowerCase();
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          uniqueList.push(q);
+        }
+        if (uniqueList.length >= 20) break;
+      }
+
+      // If needed, top up from FALLBACK_QUESTIONS to guarantee 20 unique questions
+      if (uniqueList.length < 20) {
+        for (const fq of FALLBACK_QUESTIONS) {
+          const key = `${fq.title || ""}_${fq.description || ""}`.trim().toLowerCase();
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            uniqueList.push(fq);
+          }
+          if (uniqueList.length >= 20) break;
+        }
+      }
+
+      const mapped = uniqueList.map((q) => ({
+        id: q.questionId || q.id,
         title: q.title,
         type: q.type,
         location: q.location,
@@ -509,7 +587,112 @@ async function startServer() {
       res.json(mapped);
     } catch (error: any) {
       console.error("Database fetch questions error:", error);
-      res.json(FALLBACK_QUESTIONS);
+      res.json(FALLBACK_QUESTIONS.slice(0, 20));
+    }
+  });
+
+  // API Route: Live Proctor Frame & Mic Analysis via Gemini AI
+  app.post("/api/proctor/gemini-verify", async (req, res) => {
+    try {
+      const { image, audioVolume, audioPeak } = req.body;
+
+      if (!process.env.GEMINI_API_KEY) {
+        return res.json({
+          verified: true,
+          faceDetected: true,
+          faceFacingForward: true,
+          eyesOnScreen: true,
+          violationDetected: false,
+          violationReason: null,
+          note: "Gemini API Key missing; fallback active."
+        });
+      }
+
+      if (!image) {
+        return res.status(400).json({ error: "Missing frame image" });
+      }
+
+      const base64Data = image.replace(/^data:image\/(png|jpeg|jpg);base64,/, "");
+
+      const prompt = `You are a real-time AI Proctor inspecting an examinee taking an official exam.
+Analyze this webcam image and audio telemetry:
+Audio Volume Level: ${audioVolume ?? 0}, Audio Peak: ${audioPeak ?? 0}.
+
+Evaluation criteria:
+1. Is a human face present? (If camera pointed at ceiling, wall, or empty space, faceDetected = false).
+2. Is candidate facing forward? (If looking away or turned sideways, faceFacingForward = false).
+3. Are candidate's eyes on exam screen? (If looking away or down at phone, eyesOnScreen = false).
+4. Is there a mobile phone, unauthorized device, or second person in frame? (If yes, violationDetected = true).
+5. Audio Analysis: Is audio volume > 25 or is speech/whispering/background voices detected? (If yes, speechDetected = true).
+6. Realtime Audio Comment: Provide a concise 1-sentence Gemini Proctor observation about audio and candidate status (e.g., "Microphone audio clear and quiet", "Background talking or secondary voice detected", "Sustained vocal activity or whispering detected").
+
+Return a JSON object adhering to this schema:
+{
+  "faceDetected": boolean,
+  "faceFacingForward": boolean,
+  "eyesOnScreen": boolean,
+  "violationDetected": boolean,
+  "speechDetected": boolean,
+  "violationReason": string or null,
+  "audioComment": string
+}`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.6-flash",
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                mimeType: "image/jpeg",
+                data: base64Data
+              }
+            },
+            {
+              text: prompt
+            }
+          ]
+        },
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              faceDetected: { type: Type.BOOLEAN },
+              faceFacingForward: { type: Type.BOOLEAN },
+              eyesOnScreen: { type: Type.BOOLEAN },
+              violationDetected: { type: Type.BOOLEAN },
+              speechDetected: { type: Type.BOOLEAN },
+              violationReason: { type: Type.STRING },
+              audioComment: { type: Type.STRING }
+            },
+            required: ["faceDetected", "faceFacingForward", "eyesOnScreen", "violationDetected", "speechDetected", "audioComment"]
+          }
+        }
+      });
+
+      let parsed: any = {};
+      try {
+        parsed = JSON.parse(response.text?.trim() || "{}");
+      } catch (e) {
+        console.warn("Gemini proctor JSON parse error:", e);
+      }
+
+      res.json({
+        verified: parsed.faceDetected && parsed.faceFacingForward && parsed.eyesOnScreen && !parsed.violationDetected && !parsed.speechDetected,
+        ...parsed
+      });
+
+    } catch (error: any) {
+      console.error("Gemini proctor verify error:", error?.message || error);
+      res.json({
+        verified: true,
+        faceDetected: true,
+        faceFacingForward: true,
+        eyesOnScreen: true,
+        violationDetected: false,
+        speechDetected: false,
+        errorNote: "Proctor verification API transient error."
+      });
     }
   });
 

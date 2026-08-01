@@ -157,16 +157,43 @@ function GamificationHUD() {
         )}
       </AnimatePresence>
 
-      {/* Floating HUD Controller */}
-      <div className="fixed bottom-6 right-6 z-[90] font-mono select-none" id="gamification-hud-controller">
+      {/* HUD Controller - Positioned Inline near BUILT_TO_BREAK */}
+      <div className="relative font-mono select-none" id="gamification-hud-controller">
+        {/* Core Indicator Switch */}
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className={`flex items-center gap-2 px-3 py-1.5 border transition-all duration-300 relative group shadow-xl rounded-none cursor-pointer ${
+            isOpen 
+              ? "bg-[#EF4444] text-white border-transparent" 
+              : "bg-black/90 text-zinc-300 border-zinc-800 hover:border-zinc-700 backdrop-blur-md"
+          }`}
+          id="gamification-main-hud-toggle"
+        >
+          {/* Animated red ring glow */}
+          {!isOpen && (
+            <div className="absolute -inset-0.5 rounded-none border border-red-500/20 group-hover:border-red-500/40 pointer-events-none animate-pulse" />
+          )}
+
+          <Shield className={`w-3.5 h-3.5 ${isOpen ? "text-white" : "text-[#EF4444]"}`} />
+          <div className="text-left flex items-center gap-2">
+            <span className="text-[10px] font-black tracking-widest block uppercase leading-none">
+              AUDIT RANK: <span className="text-amber-400">{rank.level}</span>
+            </span>
+            <span className="text-[9px] font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-500/30 px-1.5 py-0.5 leading-none">
+              {totalXP} XP
+            </span>
+          </div>
+          {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />}
+        </button>
+
         <AnimatePresence>
           {isOpen && (
             <motion.div
-              initial={{ opacity: 0, y: 20, scale: 0.95 }}
+              initial={{ opacity: 0, y: 8, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 15, scale: 0.95 }}
-              transition={{ duration: 0.25 }}
-              className="bg-black/95 border border-zinc-900 w-[320px] shadow-2xl p-5 mb-3 flex flex-col gap-4 relative overflow-hidden"
+              exit={{ opacity: 0, y: 8, scale: 0.95 }}
+              transition={{ duration: 0.2 }}
+              className="absolute top-full left-0 mt-2 bg-black/95 border border-zinc-800 w-[320px] sm:w-[350px] shadow-[0_10px_35px_rgba(0,0,0,0.95)] p-5 z-[150] flex flex-col gap-4 relative overflow-hidden"
               id="gamification-expanded-board"
             >
               {/* Outer hazard line banner */}
@@ -182,7 +209,7 @@ function GamificationHUD() {
                 </div>
                 <button 
                   onClick={() => setIsOpen(false)}
-                  className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -285,33 +312,6 @@ function GamificationHUD() {
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* Floating Core Indicator Switch */}
-        <button
-          onClick={() => setIsOpen(!isOpen)}
-          className={`flex items-center gap-2 px-3.5 py-2 border transition-all duration-300 relative group shadow-2xl rounded-none cursor-pointer ${
-            isOpen 
-              ? "bg-[#EF4444] text-white border-transparent" 
-              : "bg-black text-zinc-300 border-zinc-800 hover:border-zinc-700"
-          }`}
-          id="gamification-main-hud-toggle"
-        >
-          {/* Animated red ring glow */}
-          {!isOpen && (
-            <div className="absolute -inset-1 rounded-none border border-red-500/20 group-hover:border-red-500/40 pointer-events-none animate-pulse" />
-          )}
-
-          <Shield className={`w-4 h-4 ${isOpen ? "text-white" : "text-[#EF4444]"}`} />
-          <div className="text-left">
-            <span className="text-[8px] text-zinc-500 group-hover:text-zinc-400 block tracking-wider uppercase font-bold leading-none">
-              MUNICIPAL CIVIL DEFENSE
-            </span>
-            <span className="text-[10px] font-black tracking-widest block uppercase mt-0.5 leading-none">
-              AUDIT RANK: {rank.level}
-            </span>
-          </div>
-          {isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5 text-zinc-500" />}
-        </button>
       </div>
     </>
   );

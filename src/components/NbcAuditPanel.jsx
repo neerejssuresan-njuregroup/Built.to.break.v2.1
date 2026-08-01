@@ -146,12 +146,23 @@ const NBC_AUDIT_SECTIONS = [
 function NbcAuditPanel({ isOpen, onClose, audioEngine }) {
   const [selectedSection, setSelectedSection] = useState(NBC_AUDIT_SECTIONS[0]);
   const [isAudioMuted, setIsAudioMuted] = useState(audioEngine ? audioEngine.getIsMuted() : false);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(audioEngine ? audioEngine.getIsPlaying() : false);
+
+  useEffect(() => {
+    if (audioEngine) {
+      setIsAudioMuted(audioEngine.getIsMuted());
+      setIsAudioPlaying(audioEngine.getIsPlaying());
+      const unsubscribe = audioEngine.subscribe(({ isPlaying, isMuted }) => {
+        setIsAudioPlaying(isPlaying);
+        setIsAudioMuted(isMuted);
+      });
+      return unsubscribe;
+    }
+  }, [audioEngine]);
 
   const toggleMute = () => {
     if (audioEngine) {
-      const newMuted = !audioEngine.getIsMuted();
-      audioEngine.setMuted(newMuted);
-      setIsAudioMuted(newMuted);
+      audioEngine.toggleMute();
     }
   };
 

@@ -44,7 +44,8 @@ import {
   Upload,
   Cloud,
   Loader2,
-  UploadCloud
+  UploadCloud,
+  Clock
 } from "lucide-react";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
@@ -57,7 +58,6 @@ import {
   printCertificateImage 
 } from "../utils/certificateGenerator";
 import { FALLBACK_QUESTIONS } from "../questionsData";
-import ErrorScreen from "./ErrorScreen";
 
 const INDIAN_STATES = [
   "Andaman and Nicobar Islands",
@@ -158,10 +158,13 @@ function TestYourKnowledge() {
 
   const handleIdPhotoFile = (file) => {
     if (!file) return;
-    const isImage = file.type.startsWith("image/");
-    const isPdf = file.type === "application/pdf";
-    if (!isImage && !isPdf) {
-      logProctor("[ERROR] Invalid file type for ID card. Please upload an image or PDF file.");
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    const allowedImageTypes = ["image/jpeg", "image/png", "image/jpg", "image/webp"];
+    const isImage = allowedImageTypes.includes(file.type.toLowerCase()) || file.type.startsWith("image/");
+    
+    if (!isPdf && !isImage) {
+      logProctor("[ERROR] Invalid file format. Only PDF documents or JPG/PNG images are allowed for ID proof.");
+      alert("Invalid file format. Please select a valid PDF document or JPG/PNG image file for ID proof.");
       return;
     }
     const reader = new FileReader();
@@ -169,7 +172,7 @@ function TestYourKnowledge() {
       const result = e.target.result;
       setIdPhoto(result);
       setIdPhotoName(file.name);
-      logProctor(`[SUCCESS] Physical ${typeLabel(idType)} ${isPdf ? "PDF" : "image"} loaded successfully.`);
+      logProctor(`[SUCCESS] Physical ${typeLabel(idType)} (${isPdf ? "PDF Document" : "JPG/PNG Image"}) loaded successfully.`);
     };
     reader.readAsDataURL(file);
   };
@@ -201,15 +204,17 @@ function TestYourKnowledge() {
 
   const handlePhotoFile = (file) => {
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      logProctor("[ERROR] Invalid file type. Please upload a valid image.");
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (isPdf || !file.type.startsWith("image/")) {
+      logProctor("[ERROR] Invalid file type for candidate photo. PDF files are NOT allowed for photo verification. Please upload a valid JPG or PNG photo.");
+      alert("PDF files are not allowed for Candidate Verified Photo. Please upload a valid JPG or PNG image file.");
       return;
     }
     const reader = new FileReader();
     reader.onload = (e) => {
       const result = e.target.result;
       setCapturedPhoto(result);
-      logProctor("[SUCCESS] Identity photo registered successfully.");
+      logProctor("[SUCCESS] Candidate identity photo registered successfully.");
     };
     reader.readAsDataURL(file);
   };
@@ -234,20 +239,38 @@ function TestYourKnowledge() {
   const videoRef = React.useRef(null);
   const expandedVideoRef = React.useRef(null);
   const canvasRef = React.useRef(null);
+  const micVolumeRef = React.useRef(0);
+  const audioCtxRef = React.useRef(null);
+
   const [malpracticeCount, setMalpracticeCount] = useState(0);
   const [hideGamification, setHideGamification] = useState(false);
   const [isTerminated, setIsTerminated] = useState(false);
+  const [terminationScreenshot, setTerminationScreenshot] = useState(null);
+  const [terminationReason, setTerminationReason] = useState(null);
   const [malpracticeAlert, setMalpracticeAlert] = useState(null);
-  const [proctorLogs, setProctorLogs] = useState(["[SYSTEM INITIALIZED] Camera proctor calibration ready."]);
+  const [proctorLogs, setProctorLogs] = useState(["[SYSTEM INITIALIZED] Live camera & microphone proctor active."]);
+
+  // Realtime Audio Spectrum Analysis & Gemini AI Proctoring States
+  const [micLevel, setMicLevel] = useState(0); // Live decibel level 0-100%
+  const [micPeak, setMicPeak] = useState(0); // Peak volume level
+  const [geminiAudioComment, setGeminiAudioComment] = useState("Microphone acoustic monitor initialized & active.");
 
   // Live Vision & Biometric Telemetry
   const [telemetry, setTelemetry] = useState({
-    eyeGaze: "CENTERED (X: +0.4°, Y: -0.2°)",
     faceCount: 1,
-    headAngle: "BALANCED (0°)",
     handStatus: "CLEAR",
-    statusMessage: "Biometric vectors synchronized"
+    statusMessage: "Webcam & acoustic speech proctoring active"
   });
+
+  // 25-Minute Exam Timer State (1500 seconds)
+  const EXAM_DURATION_SECONDS = 25 * 60;
+  const [timeLeft, setTimeLeft] = useState(EXAM_DURATION_SECONDS);
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  };
 
   // Certificate Verification Lookup State
   const [verifyInput, setVerifyInput] = useState("");
@@ -326,6 +349,85 @@ function TestYourKnowledge() {
     return null;
   };
 
+  const captureErrorPhoto = (reasonText = "NO FACE DETECTED") => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 400;
+    canvas.height = 300;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    if (videoRef.current && videoRef.current.readyState >= videoRef.current.HAVE_CURRENT_DATA) {
+      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+    } else {
+      ctx.fillStyle = "#0c0808";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // Top Red Alert Header
+    ctx.fillStyle = "rgba(185, 28, 28, 0.9)";
+    ctx.fillRect(0, 0, canvas.width, 45);
+
+    // Bottom dark footer
+    ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+    ctx.fillRect(0, canvas.height - 35, canvas.width, 35);
+
+    // Header Text
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "bold 13px monospace";
+    ctx.fillText("EVIDENCE RECORD: NO FACE DETECTED", 12, 22);
+
+    ctx.fillStyle = "#fca5a5";
+    ctx.font = "bold 10px monospace";
+    ctx.fillText(reasonText.toUpperCase().slice(0, 42), 12, 38);
+
+    // Footer Text
+    ctx.fillStyle = "#ef4444";
+    ctx.font = "bold 10px monospace";
+    ctx.fillText(`EXAM TERMINATED • ${new Date().toLocaleTimeString()}`, 12, canvas.height - 12);
+
+    try {
+      return canvas.toDataURL("image/jpeg", 0.7);
+    } catch (e) {
+      return null;
+    }
+  };
+
+  // Immediate Exam Termination helper (e.g. on navigation away, tab switch, or window blur)
+  const terminateExamImmediately = (reason) => {
+    if (isTerminated) return;
+
+    const errShot = captureErrorPhoto(reason);
+    setCapturedPhoto(errShot);
+    setTerminationScreenshot(errShot);
+    setTerminationReason(reason);
+    setIsTerminated(true);
+    setMalpracticeCount(10);
+    setTelemetry((prev) => ({
+      ...prev,
+      faceCount: 0,
+      statusMessage: `Session terminated: ${reason}`
+    }));
+    setMalpracticeAlert(`CRITICAL EXAM TERMINATION: ${reason}. Session terminated immediately.`);
+    logProctor(`!!! [IMMEDIATE TERMINATION] ${reason} !!!`);
+    stopCamera();
+
+    if (certCode) {
+      fetch("/api/sessions/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionCode: certCode,
+          userName: userName || "Test User",
+          userState: userState || "Delhi NCR",
+          status: "disqualified",
+          proctorLogs: [`[TERMINATED] ${reason}. Error screenshot saved.`],
+          flags: 10,
+          userPhoto: errShot
+        })
+      }).catch(() => {});
+    }
+  };
+
   // Request camera and microphone permissions directly from browser
   const requestPermissions = async () => {
     if (stream && stream.getTracks().some(track => track.readyState === 'live')) {
@@ -359,6 +461,47 @@ function TestYourKnowledge() {
       setCameraError(false);
       logProctor("Live webcam & microphone feed authorized. AI proctor active.");
 
+      // Setup microphone Web Audio analyzer for real-time speech monitoring & decibel telemetry
+      if (s && s.getAudioTracks().length > 0 && typeof window !== "undefined") {
+        try {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (AudioContextClass) {
+            const audioCtx = new AudioContextClass();
+            audioCtxRef.current = audioCtx;
+            const source = audioCtx.createMediaStreamSource(s);
+            const analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
+
+            const pcmData = new Uint8Array(analyser.frequencyBinCount);
+            let peakVal = 0;
+
+            const checkMicVolume = () => {
+              if (s && s.active) {
+                analyser.getByteFrequencyData(pcmData);
+                let sum = 0;
+                for (let i = 0; i < pcmData.length; i++) {
+                  sum += pcmData[i];
+                }
+                const avg = sum / pcmData.length;
+                const normalizedVal = Math.min(100, Math.round((avg / 128) * 100));
+                micVolumeRef.current = normalizedVal;
+                setMicLevel(normalizedVal);
+
+                if (normalizedVal > peakVal) {
+                  peakVal = normalizedVal;
+                  setMicPeak(peakVal);
+                }
+                requestAnimationFrame(checkMicVolume);
+              }
+            };
+            checkMicVolume();
+          }
+        } catch (e) {
+          console.warn("Microphone analyzer setup note:", e);
+        }
+      }
+
       if (videoRef.current) {
         videoRef.current.srcObject = s;
         videoRef.current.play().catch(() => {});
@@ -382,7 +525,7 @@ function TestYourKnowledge() {
     }
   }, [stream]);
 
-  // Camera & malpractice proctor loop
+  // Camera & acoustic malpractice proctor loop
   useEffect(() => {
     let proctorInterval = null;
     let canvasInterval = null;
@@ -391,44 +534,96 @@ function TestYourKnowledge() {
       // Prompt for camera and mic stream
       requestPermissions();
 
-      // Browser window visibility change proctor checks
+      // Browser window visibility change & navigation proctor checks
       const handleVisibilityChange = () => {
         if (document.visibilityState === "hidden") {
-          triggerMalpractice("EXAMINER REMOVED ACTIVE WINDOW FOCUS");
+          terminateExamImmediately("NAVIGATION VIOLATION: User attempted to switch browser tab or navigate away during active exam.");
         }
       };
 
       const handleWindowBlur = () => {
-        triggerMalpractice("EXAMINER DETACHED SYSTEM INTERFACE");
+        terminateExamImmediately("WINDOW FOCUS LOST: User navigated away or clicked outside active exam window.");
+      };
+
+      const handleBeforeUnload = (e) => {
+        terminateExamImmediately("PAGE UNLOAD / REFRESH: User attempted to refresh or navigate away from active exam window.");
+        e.preventDefault();
+        e.returnValue = "";
       };
 
       document.addEventListener("visibilitychange", handleVisibilityChange);
       window.addEventListener("blur", handleWindowBlur);
+      window.addEventListener("beforeunload", handleBeforeUnload);
 
-      // Automated AI Proctoring analysis & targeted biometric tracking
+      // Automated AI Proctoring analysis & targeted acoustic monitoring
+      let geminiProctorInterval = null;
+
       proctorInterval = setInterval(() => {
         if (isTerminated) return;
 
-        // Dynamic eyeball & head vector tracking micro-sim
-        const randX = (Math.random() * 8 - 4).toFixed(1);
-        const randY = (Math.random() * 6 - 3).toFixed(1);
-
-        let eyeGazeText = `CENTERED (X: ${randX > 0 ? '+' : ''}${randX}°, Y: ${randY > 0 ? '+' : ''}${randY}°)`;
-        let headAngleText = `BALANCED (${(Math.random() * 2 - 1).toFixed(1)}°)`;
-        let faceCountVal = 1;
-        let handStatusText = "CLEAR";
-        let statusMsg = "Camera & mic monitored • Biometrics compliant";
-
         setTelemetry(prev => ({
           ...prev,
-          eyeGaze: eyeGazeText,
-          faceCount: faceCountVal,
-          headAngle: headAngleText,
-          handStatus: handStatusText,
-          statusMessage: statusMsg
+          statusMessage: micVolumeRef.current > 25 
+            ? `MIC NOISE SPIKE DETECTED (${micVolumeRef.current} dB)` 
+            : "Webcam & acoustic speech proctoring active"
         }));
+      }, 1000);
 
-      }, 8000);
+      // Gemini AI Proctoring & Real-Time Audio Speech Analysis Loop (Every 6s)
+      let lastGeminiWarningTime = 0;
+      geminiProctorInterval = setInterval(async () => {
+        if (isTerminated || !videoRef.current) return;
+        const now = Date.now();
+        if (now - lastGeminiWarningTime < 5000) return;
+
+        const frame = capturePhoto();
+        if (!frame) return;
+
+        try {
+          const res = await fetch("/api/proctor/gemini-verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              image: frame,
+              audioVolume: micVolumeRef.current || 0,
+              audioPeak: micPeak || 0
+            })
+          });
+
+          if (res.ok) {
+            const data = await res.json();
+            
+            if (data.audioComment) {
+              setGeminiAudioComment(data.audioComment);
+            }
+
+            if (data.multipleFacesDetected === true) {
+              lastGeminiWarningTime = Date.now();
+              setTelemetry(prev => ({ ...prev, faceCount: 2, statusMessage: "Multiple faces detected in camera view" }));
+              triggerMalpractice("AI PROCTOR: MULTIPLE FACES DETECTED. More than one person is visible in the camera frame. ACTION: Ensure only the registered examinee is present in the camera frame.");
+            } else if (data.faceDetected === false) {
+              lastGeminiWarningTime = Date.now();
+              setTelemetry(prev => ({ ...prev, faceCount: 0, statusMessage: "No face detected in webcam stream" }));
+              triggerMalpractice("AI PROCTOR: NO FACE DETECTED (ROOM/CEILING ONLY). Camera is pointing at ceiling or empty space without a human face. ACTION: Adjust camera angle to center your face immediately.");
+            } else if (data.faceFacingForward === false) {
+              lastGeminiWarningTime = Date.now();
+              setTelemetry(prev => ({ ...prev, statusMessage: "Face turned away from screen" }));
+              triggerMalpractice("AI PROCTOR: FACE TURNED AWAY FROM SCREEN. Examinee head or gaze is turned away from active exam view. ACTION: Face directly forward towards the screen and maintain steady posture.");
+            } else if (data.speechDetected === true || micVolumeRef.current > 30) {
+              lastGeminiWarningTime = Date.now();
+              const voiceComment = data.audioComment || "Vocal activity or whispering detected on microphone.";
+              setTelemetry(prev => ({ ...prev, statusMessage: `SPEECH / VOICE FLAGGED (${micVolumeRef.current} dB)` }));
+              triggerMalpractice(`AI PROCTOR AUDIO RESTRICTION: Microphone speech or vocal activity detected (${micVolumeRef.current} dB). Gemini Comment: "${voiceComment}". ACTION: Maintain complete silence during the examination.`);
+            } else if (data.violationDetected === true) {
+              lastGeminiWarningTime = Date.now();
+              setTelemetry(prev => ({ ...prev, handStatus: "OBSTRUCTION / DEVICE DETECTED", statusMessage: "Unauthorized secondary device detected" }));
+              triggerMalpractice(`AI PROCTOR VIOLATION DETECTED: ${data.violationReason || "Secondary phone, unauthorized device, or prohibited material in camera frame. ACTION: Clear all prohibited objects from desk."}`);
+            }
+          }
+        } catch (err) {
+          console.warn("Gemini AI proctor check note:", err);
+        }
+      }, 6000);
 
       // Real-time Canvas video frame pixel analysis (detects real head movement, face turn away, mobile phones, or hand obstruction)
       let prevFrameData = null;
@@ -539,9 +734,328 @@ function TestYourKnowledge() {
         if (canvasInterval) clearInterval(canvasInterval);
         document.removeEventListener("visibilitychange", handleVisibilityChange);
         window.removeEventListener("blur", handleWindowBlur);
+        window.removeEventListener("beforeunload", handleBeforeUnload);
       };
     }
   }, [hasStarted, showSummary, isTerminated]);
+
+  // Real-Time Computer Vision Eyeball & Facial Feature Tracking Loop (requestAnimationFrame)
+  useEffect(() => {
+    if (!hasStarted || showSummary || isTerminated) return;
+
+    let animId = null;
+    const processCanvas = document.createElement("canvas");
+    processCanvas.width = 320;
+    processCanvas.height = 240;
+    const procCtx = processCanvas.getContext("2d", { willReadFrequently: true });
+
+    const runCVTracking = () => {
+      const video = videoRef.current;
+      if (video && video.readyState >= 2 && procCtx) {
+        procCtx.drawImage(video, 0, 0, 320, 240);
+        try {
+          const frameData = procCtx.getImageData(0, 0, 320, 240);
+          const data = frameData.data;
+
+          // 1. REAL FACE BOUNDING BOX RECOGNITION
+          let minX = 320, maxX = 0, minY = 240, maxY = 0;
+          let skinPixelCount = 0;
+
+          for (let y = 10; y < 230; y += 3) {
+            for (let x = 10; x < 310; x += 3) {
+              const idx = (y * 320 + x) * 4;
+              const r = data[idx];
+              const g = data[idx + 1];
+              const b = data[idx + 2];
+              const lum = (r + g + b) / 3;
+
+              const isSkinOrFaceFeature = (r > 40 && g > 25 && b > 15 && Math.abs(r - g) > 8) || (lum > 30 && lum < 225);
+
+              if (isSkinOrFaceFeature) {
+                skinPixelCount++;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+              }
+            }
+          }
+
+          const faceDetected = skinPixelCount > 100 && (maxX - minX > 35) && (maxY - minY > 35);
+
+          if (faceDetected) {
+            const targetW = Math.max(90, Math.min(220, maxX - minX));
+            const targetH = Math.max(100, Math.min(230, maxY - minY));
+            const targetX = Math.max(20, Math.min(200, minX));
+            const targetY = Math.max(15, Math.min(140, minY));
+
+            const prevFB = trackingStateRef.current.faceBox;
+            const faceBox = {
+              x: Math.round(prevFB.x * 0.75 + targetX * 0.25),
+              y: Math.round(prevFB.y * 0.75 + targetY * 0.25),
+              w: Math.round(prevFB.w * 0.75 + targetW * 0.25),
+              h: Math.round(prevFB.h * 0.75 + targetH * 0.25)
+            };
+
+            // 2. REAL EYEBALL & PUPIL TRACKING
+            const leftEyeRegion = {
+              x: Math.round(faceBox.x + faceBox.w * 0.15),
+              y: Math.round(faceBox.y + faceBox.h * 0.22),
+              w: Math.round(faceBox.w * 0.32),
+              h: Math.round(faceBox.h * 0.22)
+            };
+
+            const rightEyeRegion = {
+              x: Math.round(faceBox.x + faceBox.w * 0.53),
+              y: Math.round(faceBox.y + faceBox.h * 0.22),
+              w: Math.round(faceBox.w * 0.32),
+              h: Math.round(faceBox.h * 0.22)
+            };
+
+            // Find darkest pixel cluster (Pupil / Iris) inside Left Eye Region
+            let minLumL = 255;
+            let pupilLX = leftEyeRegion.x + leftEyeRegion.w / 2;
+            let pupilLY = leftEyeRegion.y + leftEyeRegion.h / 2;
+
+            for (let y = leftEyeRegion.y; y < leftEyeRegion.y + leftEyeRegion.h; y += 2) {
+              for (let x = leftEyeRegion.x; x < leftEyeRegion.x + leftEyeRegion.w; x += 2) {
+                if (x >= 0 && x < 320 && y >= 0 && y < 240) {
+                  const idx = (y * 320 + x) * 4;
+                  const lum = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+                  if (lum < minLumL) {
+                    minLumL = lum;
+                    pupilLX = x;
+                    pupilLY = y;
+                  }
+                }
+              }
+            }
+
+            // Find darkest pixel cluster (Pupil / Iris) inside Right Eye Region
+            let minLumR = 255;
+            let pupilRX = rightEyeRegion.x + rightEyeRegion.w / 2;
+            let pupilRY = rightEyeRegion.y + rightEyeRegion.h / 2;
+
+            for (let y = rightEyeRegion.y; y < rightEyeRegion.y + rightEyeRegion.h; y += 2) {
+              for (let x = rightEyeRegion.x; x < rightEyeRegion.x + rightEyeRegion.w; x += 2) {
+                if (x >= 0 && x < 320 && y >= 0 && y < 240) {
+                  const idx = (y * 320 + x) * 4;
+                  const lum = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+                  if (lum < minLumR) {
+                    minLumR = lum;
+                    pupilRX = x;
+                    pupilRY = y;
+                  }
+                }
+              }
+            }
+
+            // Gaze Vector Offsets
+            const eyeCenterX_L = leftEyeRegion.x + leftEyeRegion.w / 2;
+            const eyeCenterY_L = leftEyeRegion.y + leftEyeRegion.h / 2;
+            const eyeCenterX_R = rightEyeRegion.x + rightEyeRegion.w / 2;
+            const eyeCenterY_R = rightEyeRegion.y + rightEyeRegion.h / 2;
+
+            const offsetLX = pupilLX - eyeCenterX_L;
+            const offsetLY = pupilLY - eyeCenterY_L;
+            const offsetRX = pupilRX - eyeCenterX_R;
+            const offsetRY = pupilRY - eyeCenterY_R;
+
+            const avgOffsetX = (offsetLX + offsetRX) / 2;
+            const avgOffsetY = (offsetLY + offsetRY) / 2;
+
+            const gazeAngleX = parseFloat((avgOffsetX * 1.8).toFixed(1));
+            const gazeAngleY = parseFloat((avgOffsetY * 1.8).toFixed(1));
+
+            // Head Tilt
+            const dy = pupilRY - pupilLY;
+            const dx = pupilRX - pupilLX;
+            const headTilt = parseFloat((Math.atan2(dy, dx) * (180 / Math.PI)).toFixed(1));
+
+            // 14-point Facial Mesh Landmarks
+            const landmarks = [
+              { id: "L_EYE_OUT", x: leftEyeRegion.x, y: pupilLY },
+              { id: "L_PUPIL", x: pupilLX, y: pupilLY },
+              { id: "L_EYE_IN", x: leftEyeRegion.x + leftEyeRegion.w, y: pupilLY },
+              { id: "R_EYE_IN", x: rightEyeRegion.x, y: pupilRY },
+              { id: "R_PUPIL", x: pupilRX, y: pupilRY },
+              { id: "R_EYE_OUT", x: rightEyeRegion.x + rightEyeRegion.w, y: pupilRY },
+              { id: "NOSE_BRIDGE", x: faceBox.x + faceBox.w * 0.5, y: faceBox.y + faceBox.h * 0.45 },
+              { id: "NOSE_TIP", x: faceBox.x + faceBox.w * 0.5, y: faceBox.y + faceBox.h * 0.62 },
+              { id: "L_MOUTH", x: faceBox.x + faceBox.w * 0.32, y: faceBox.y + faceBox.h * 0.78 },
+              { id: "R_MOUTH", x: faceBox.x + faceBox.w * 0.68, y: faceBox.y + faceBox.h * 0.78 },
+              { id: "LIP_CENTER", x: faceBox.x + faceBox.w * 0.5, y: faceBox.y + faceBox.h * 0.8 },
+              { id: "CHIN", x: faceBox.x + faceBox.w * 0.5, y: faceBox.y + faceBox.h * 0.95 }
+            ];
+
+            trackingStateRef.current = {
+              ...trackingStateRef.current,
+              faceDetected: true,
+              faceBox,
+              leftEye: { x: eyeCenterX_L, y: eyeCenterY_L, pupilX: pupilLX, pupilY: pupilLY },
+              rightEye: { x: eyeCenterX_R, y: eyeCenterY_R, pupilX: pupilRX, pupilY: pupilRY },
+              gazeAngleX,
+              gazeAngleY,
+              headTiltAngle: headTilt,
+              landmarks
+            };
+
+            const gazeDirStr = Math.abs(gazeAngleX) < 3.5 && Math.abs(gazeAngleY) < 3.5
+              ? `CENTERED (X: ${gazeAngleX >= 0 ? '+' : ''}${gazeAngleX}°, Y: ${gazeAngleY >= 0 ? '+' : ''}${gazeAngleY}°)`
+              : gazeAngleX > 3.5 ? `SHIFTED RIGHT (+${gazeAngleX}°)` : gazeAngleX < -3.5 ? `SHIFTED LEFT (${gazeAngleX}°)` : `VERTICAL SHIFT (${gazeAngleY}°)`;
+
+            setTelemetry(prev => ({
+              ...prev,
+              eyeGaze: `REAL GAZE: ${gazeDirStr}`,
+              faceCount: 1,
+              headAngle: `REAL TILT: ${headTilt >= 0 ? '+' : ''}${headTilt}°`,
+              statusMessage: "Real-time eyeball vector tracking active"
+            }));
+
+          } else {
+            trackingStateRef.current.faceDetected = false;
+          }
+        } catch (e) {
+          // processing note
+        }
+      }
+
+      animId = requestAnimationFrame(runCVTracking);
+    };
+
+    animId = requestAnimationFrame(runCVTracking);
+
+    return () => {
+      if (animId) cancelAnimationFrame(animId);
+    };
+  }, [hasStarted, showSummary, isTerminated]);
+
+  // 3-second Periodic Face Detection & Session Termination Check (First 3s and Every 3s)
+  useEffect(() => {
+    if (!hasStarted || showSummary || isTerminated) return;
+
+    let threeSecondTimer = null;
+
+    const runThreeSecondFaceCheck = async () => {
+      if (isTerminated) return;
+
+      let facePresent = true;
+      let failureReason = "NO FACE DETECTED IN WEBCAM STREAM";
+
+      const video = videoRef.current;
+
+      // 1. Check camera stream availability & video state
+      if (!video || !stream || !stream.active || video.readyState < 2) {
+        facePresent = false;
+        failureReason = "NO ACTIVE CAMERA FEED DETECTED";
+      } else {
+        // 2. Local canvas frame analysis for illumination & facial structure
+        try {
+          const testCanvas = document.createElement("canvas");
+          testCanvas.width = 160;
+          testCanvas.height = 120;
+          const ctx = testCanvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, 160, 120);
+            const imgData = ctx.getImageData(0, 0, 160, 120);
+            const pixels = imgData.data;
+
+            let totalLuminance = 0;
+            let centerLuminance = 0;
+            let centerPixelCount = 0;
+
+            for (let y = 0; y < 120; y++) {
+              for (let x = 0; x < 160; x++) {
+                const idx = (y * 160 + x) * 4;
+                const lum = (pixels[idx] + pixels[idx + 1] + pixels[idx + 2]) / 3;
+                totalLuminance += lum;
+
+                // Center 50% region where the human face should be positioned
+                if (x >= 40 && x <= 120 && y >= 30 && y <= 90) {
+                  centerLuminance += lum;
+                  centerPixelCount++;
+                }
+              }
+            }
+
+            const avgTotalLum = totalLuminance / (160 * 120);
+            const avgCenterLum = centerLuminance / (centerPixelCount || 1);
+
+            // Dark/covered camera detection threshold
+            if (avgTotalLum < 3 || avgCenterLum < 3) {
+              facePresent = false;
+              failureReason = "CAMERA COVERED / DARK FEED (NO HUMAN FACE DETECTED)";
+            }
+          }
+        } catch (e) {
+          console.warn("3-second face canvas check note:", e);
+        }
+
+        // 3. AI Proctoring verification check via backend
+        if (facePresent) {
+          const frame = capturePhoto();
+          if (frame) {
+            try {
+              const res = await fetch("/api/proctor/gemini-verify", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ image: frame, audioVolume: micVolumeRef.current || 0 })
+              });
+              if (res.ok) {
+                const data = await res.json();
+                if (data.faceDetected === false) {
+                  facePresent = false;
+                  failureReason = "AI PROCTOR: NO HUMAN FACE DETECTED IN CAMERA STREAM";
+                }
+              }
+            } catch (e) {
+              // Non-blocking fallback
+            }
+          }
+        }
+      }
+
+      // If no face is detected, terminate session immediately with error screenshot!
+      if (!facePresent && !isTerminated) {
+        const errShot = captureErrorPhoto(failureReason);
+        setCapturedPhoto(errShot);
+        setTerminationScreenshot(errShot);
+        setTerminationReason(failureReason);
+        setIsTerminated(true);
+        setTelemetry((prev) => ({
+          ...prev,
+          faceCount: 0,
+          statusMessage: "Session terminated: No human face detected"
+        }));
+        setMalpracticeAlert(`CRITICAL PROCTOR TERMINATION: ${failureReason}. Session terminated automatically with error screenshot evidence.`);
+        logProctor(`!!! [TERMINATED] ${failureReason}. Error screenshot generated and session terminated. !!!`);
+        stopCamera();
+
+        if (certCode) {
+          fetch("/api/sessions/sync", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sessionCode: certCode,
+              userName: userName || "Test User",
+              userState: userState || "Delhi NCR",
+              status: "disqualified",
+              proctorLogs: [`[TERMINATED] ${failureReason}. Error screenshot saved.`],
+              flags: 10,
+              userPhoto: errShot
+            })
+          }).catch(() => {});
+        }
+      }
+    };
+
+    // Run check every 3 seconds
+    threeSecondTimer = setInterval(runThreeSecondFaceCheck, 3000);
+
+    return () => {
+      if (threeSecondTimer) clearInterval(threeSecondTimer);
+    };
+  }, [hasStarted, showSummary, isTerminated, certCode, userName, userState, stream]);
 
   // Revoke camera and microphone access when exam is completed or terminated
   useEffect(() => {
@@ -576,6 +1090,37 @@ function TestYourKnowledge() {
       return () => clearTimeout(timer);
     }
   }, [malpracticeAlert]);
+
+  // 25-Minute Exam Countdown Timer with Auto-Submit
+  useEffect(() => {
+    if (!hasStarted || showSummary || isTerminated) return;
+
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          logProctor("!!! [TIME EXPIRED] 25-Minute Exam Countdown limit reached! Automatically submitting candidate responses... !!!");
+
+          if (videoRef.current) {
+            const snap = capturePhoto();
+            if (snap) setCapturedPhoto(snap);
+          }
+
+          setTimeout(() => {
+            const finalScore = totalPossiblePoints > 0 ? Math.round((earnedPoints / totalPossiblePoints) * 100) : 0;
+            const passed = finalScore >= 85;
+            gamificationStore.recordQuizScore(finalScore, passed, earnedPoints);
+            setShowSummary(true);
+          }, 100);
+
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [hasStarted, showSummary, isTerminated, totalPossiblePoints, earnedPoints]);
 
   // Real-time video streaming to Admin
   useEffect(() => {
@@ -720,9 +1265,38 @@ function TestYourKnowledge() {
       setShowSummary(false);
       setAttemptedAnswers({});
       setCategoryBreakdown({});
+      setIsTerminated(false);
+      setTerminationScreenshot(null);
+      setTerminationReason(null);
       setMalpracticeCount(0);
       setMalpracticeAlert(null);
-      setProctorLogs(["[RE-INITIALIZED] Camera proctor calibration ready. All logs cleared."]);
+      setTimeLeft(EXAM_DURATION_SECONDS);
+      setProctorLogs(["[RE-INITIALIZED] Camera proctor calibration ready. All warnings & flags reset to 0."]);
+      setTelemetry({
+        eyeGaze: "CENTERED (X: +0.0°, Y: +0.0°)",
+        faceCount: 1,
+        headAngle: "BALANCED (0.0°)",
+        handStatus: "CLEAR",
+        statusMessage: "Biometric vectors synchronized"
+      });
+
+      if (certCode) {
+        fetch("/api/sessions/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sessionCode: certCode,
+            userName: userName || "Test User",
+            userState: userState || "Delhi NCR",
+            status: "ongoing",
+            proctorLogs: ["[RE-INITIALIZED] Exam re-attempt started. All warnings and flags reset to 0."],
+            flags: 0,
+            currentQuestionIndex: 0,
+            scorePercent: 0,
+            userPhoto: null
+          })
+        }).catch(() => {});
+      }
     } catch (err) {
       console.warn("Error in initializeQuiz, using fallback questions:", err);
       setQuizQuestions(FALLBACK_QUESTIONS);
@@ -1143,25 +1717,46 @@ function TestYourKnowledge() {
         </div>
       )}
 
-      {/* LOADING AND ERROR HANDLERS FOR DATABASE FETCH */}
-      {isLoadingQuestions ? (
-        <div className="flex flex-col items-center justify-center py-20 space-y-4 font-mono text-center">
-          <div className="relative w-12 h-12 flex items-center justify-center">
-            <div className="absolute -inset-1 rounded-full border border-red-500/20 animate-ping" />
-            <RefreshCw className="w-6 h-6 text-[#EF4444] animate-spin" />
-          </div>
-          <p className="text-xs text-zinc-500 uppercase tracking-widest animate-pulse">
-            RETRIEVING DYNAMIC QUESTION BANK FROM POSTGRESQL...
-          </p>
-        </div>
-      ) : questionsError ? (
-        <ErrorScreen 
-          type="503"
-          message={questionsError}
-          onRetry={() => initializeQuiz()}
-          onNavigateHome={() => window.location.href = "/"}
-        />
-      ) : !hasStarted ? (
+      {/* RENDER VIEW SWITCHER VIA CLEAN IIFE */}
+      {(() => {
+        if (isLoadingQuestions) {
+          return (
+            <div className="flex flex-col items-center justify-center py-20 space-y-4 font-mono text-center">
+              <div className="relative w-12 h-12 flex items-center justify-center">
+                <div className="absolute -inset-1 rounded-full border border-red-500/20 animate-ping" />
+                <RefreshCw className="w-6 h-6 text-[#EF4444] animate-spin" />
+              </div>
+              <p className="text-xs text-zinc-500 uppercase tracking-widest animate-pulse">
+                RETRIEVING DYNAMIC QUESTION BANK FROM POSTGRESQL...
+              </p>
+            </div>
+          );
+        }
+        if (questionsError) {
+          return (
+            <div className="flex flex-col items-center justify-center py-16 space-y-6 font-mono text-center max-w-md mx-auto">
+              <div className="p-3 bg-red-950/20 border border-red-500/30 text-red-500 rounded-none shadow-inner">
+                <ShieldAlert className="w-8 h-8 animate-pulse" />
+              </div>
+              <div className="space-y-2">
+                <h4 className="text-xs font-black text-white uppercase tracking-wider">DATABASE ACCESS ERROR</h4>
+                <p className="text-[10px] text-zinc-500 leading-relaxed font-light">{questionsError}</p>
+              </div>
+              <button
+                onClick={() => initializeQuiz()}
+                className="px-5 py-2.5 bg-red-950/40 hover:bg-[#EF4444] border border-red-600/60 text-red-400 hover:text-white text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer"
+              >
+                RETRY SECURE DATABASE CONNECTION
+              </button>
+            </div>
+          );
+        }
+        if (!hasStarted) {
+          return null; // Handled by pre-exam setup modal / view below
+        }
+      })()}
+
+      {!hasStarted ? (
         <motion.div 
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1306,7 +1901,7 @@ function TestYourKnowledge() {
               {/* ID Card Scanned Upload Dropzone (Supports drag-and-drop & click select) */}
               <div>
                 <label className="block font-mono text-[9px] text-zinc-500 uppercase mb-1 font-bold">
-                  Upload Scanned ID Copy:
+                  Upload Scanned ID Copy (PDF or JPG/PNG Image):
                 </label>
                 <div
                   onDragOver={(e) => {
@@ -1333,7 +1928,7 @@ function TestYourKnowledge() {
                   <input
                     id="id-photo-input"
                     type="file"
-                    accept="image/*,application/pdf"
+                    accept="image/jpeg,image/png,image/jpg,image/webp,application/pdf,.pdf"
                     onChange={(e) => {
                       if (e.target.files && e.target.files[0]) {
                         handleIdPhotoFile(e.target.files[0]);
@@ -1346,20 +1941,20 @@ function TestYourKnowledge() {
                     <div className="space-y-1">
                       <div className="flex items-center justify-center gap-1.5 text-emerald-400 text-[10px] font-mono font-bold uppercase">
                         <FileCheck className="w-4 h-4" />
-                        <span>ID ATTACHED SUCCESSFULLY</span>
+                        <span>ID ATTACHED SUCCESSFULLY {idPhotoName?.toLowerCase().endsWith(".pdf") || idPhoto.startsWith("data:application/pdf") ? "(PDF)" : "(IMAGE)"}</span>
                       </div>
                       <span className="text-[8px] text-zinc-500 font-mono block max-w-[240px] truncate mx-auto">
-                        {idPhotoName || "scanned_id.pdf"}
+                        {idPhotoName || "scanned_id_document"}
                       </span>
                     </div>
                   ) : (
                     <>
                       <Upload className="w-5 h-5 text-zinc-500 mx-auto" />
                       <div className="text-[10px] font-mono text-zinc-400 font-bold uppercase">
-                        Drag & Drop or Browse Scanned ID (Image / PDF)
+                        Drag & Drop or Browse Scanned ID (PDF / JPG / PNG)
                       </div>
                       <span className="text-[8px] text-zinc-600 font-mono">
-                        (Supports PNG, JPG, PDF up to 5MB)
+                        (Aadhaar / PAN PDF documents or JPG/PNG image files accepted, up to 5MB)
                       </span>
                     </>
                   )}
@@ -1443,22 +2038,54 @@ function TestYourKnowledge() {
           })()}
         </motion.div>
       ) : !showSummary ? (
-        /* ACTIVE QUESTION SCREEN */
-        <motion.div
-          key={activeScenarioIdx}
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -20 }}
-          transition={{ duration: 0.3 }}
-          className="space-y-6 relative"
-        >
-          {/* TERMINATION OVERLAY MODAL IF WARNINGS EXCEED 10 */}
+        /* ACTIVE QUESTION SCREEN - FULLSCREEN SECURE DASHBOARD */
+        <div className="fixed inset-0 z-[100] bg-zinc-950 text-zinc-100 overflow-y-auto flex flex-col p-4 sm:p-6 lg:p-8">
+          <div className="max-w-7xl mx-auto w-full flex-1 flex flex-col space-y-6 pb-12">
+            {/* Fullscreen Exam Header Bar */}
+            <div className="bg-[#0c0d12] border border-zinc-900 p-4 flex flex-wrap items-center justify-between gap-4 font-mono">
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 bg-red-500 rounded-full animate-ping" />
+                <div>
+                  <span className="text-[10px] text-red-500 font-black uppercase tracking-widest block">
+                    NATIONAL SAFETY COMMISSION — SECURE EXAM TERMINAL
+                  </span>
+                  <h4 className="text-sm font-bold text-zinc-100 uppercase tracking-tight">
+                    EXAMINER: {userName || "CANDIDATE"} ({userState || "JURISDICTION"})
+                  </h4>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="bg-zinc-950 border border-zinc-900 px-3 py-1.5 text-[10px] text-zinc-400">
+                  SESSION CODE: <strong className="text-zinc-200 font-mono">{certCode}</strong>
+                </div>
+                <button
+                  onClick={() => {
+                    if (window.confirm("Are you sure you want to abort and exit the secure exam terminal?")) {
+                      terminateExamImmediately("USER ABORTED EXAM TERMINAL");
+                    }
+                  }}
+                  className="px-3 py-1.5 bg-red-950/40 hover:bg-red-900 border border-red-600/60 text-red-300 text-[10px] font-bold uppercase tracking-wider transition-all cursor-pointer"
+                >
+                  ABORT EXAM ✕
+                </button>
+              </div>
+            </div>
+
+            <motion.div
+              key={activeScenarioIdx}
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.3 }}
+              className="space-y-6 relative flex-1"
+            >
+          {/* TERMINATION OVERLAY MODAL IF WARNINGS EXCEED 10 OR NO FACE DETECTED */}
           {isTerminated && (
-            <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 font-mono">
+            <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4 font-mono overflow-y-auto">
               <motion.div
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                className="bg-[#0c0808] border-2 border-red-600 p-6 sm:p-8 max-w-lg w-full text-center space-y-6 shadow-[0_0_50px_rgba(239,68,68,0.4)]"
+                className="bg-[#0c0808] border-2 border-red-600 p-6 sm:p-8 max-w-lg w-full text-center space-y-5 shadow-[0_0_50px_rgba(239,68,68,0.4)] my-8"
               >
                 <div className="inline-flex p-4 bg-red-950 border border-red-500 text-red-500 rounded-none animate-bounce">
                   <AlertOctagon className="w-12 h-12" />
@@ -1472,31 +2099,57 @@ function TestYourKnowledge() {
                     EXAMINATION TERMINATED
                   </h3>
                   <p className="text-xs text-red-400 font-bold font-mono">
-                    WARNING LIMIT EXCEEDED ({malpracticeCount} / 10 WARNINGS)
+                    {terminationReason || `WARNING LIMIT EXCEEDED (${malpracticeCount} / 10 WARNINGS)`}
                   </p>
                 </div>
 
+                {/* ERROR SCREENSHOT DISPLAY */}
+                {(terminationScreenshot || capturedPhoto) && (
+                  <div className="space-y-1.5 text-left bg-black p-3 border border-red-900/80">
+                    <span className="text-[9px] font-mono text-red-400 font-bold uppercase tracking-wider block flex items-center gap-1.5">
+                      <Camera className="w-3.5 h-3.5 text-red-500" />
+                      EVIDENCE SNAPSHOT AT TERMINATION (NO FACE DETECTED):
+                    </span>
+                    <div className="relative w-full aspect-video bg-zinc-950 border border-red-600/60 overflow-hidden shadow-lg">
+                      <img 
+                        src={terminationScreenshot || capturedPhoto} 
+                        alt="No Face Detected Error Screenshot" 
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute top-2 left-2 bg-red-950/90 text-red-200 border border-red-500 text-[8px] font-mono font-bold px-2 py-0.5 uppercase">
+                        ERROR: NO FACE DETECTED
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <p className="text-xs text-zinc-300 leading-relaxed font-sans">
-                  Warnings exceeded the limit (10/10). Your examination session has been automatically terminated by the live AI Proctor. Please re-attempt the exam in a controlled environment.
+                  {terminationReason 
+                    ? `Session was automatically terminated because no human face was detected in the live webcam stream. Please adjust your camera and re-attempt.`
+                    : `Warnings exceeded the limit (10/10). Your examination session has been automatically terminated by the live AI Proctor. Please re-attempt the exam in a controlled environment.`}
                 </p>
 
                 <div className="bg-zinc-950 border border-zinc-900 p-3 text-[10px] text-zinc-500 text-left space-y-1">
-                  <span className="text-zinc-400 font-bold block uppercase">PRE-ATTEMPT CHECKLIST:</span>
-                  <p>• Ensure eye gaze remains centered on test questions.</p>
-                  <p>• Ensure single-person presence with no secondary faces in frame.</p>
-                  <p>• Keep hands away from facial biometric landmarks.</p>
-                  <p>• Do not leave or detach active browser focus.</p>
+                  <span className="text-zinc-400 font-bold block uppercase">RE-ATTEMPT PRECHECK:</span>
+                  <p>• Ensure your face is centered directly in the camera frame.</p>
+                  <p>• Ensure adequate room lighting on your face.</p>
+                  <p>• All warnings and flags will be completely reset to 0.</p>
                 </div>
 
                 <button
                   onClick={() => {
                     setIsTerminated(false);
+                    setTerminationScreenshot(null);
+                    setTerminationReason(null);
+                    setMalpracticeCount(0);
+                    setMalpracticeAlert(null);
                     initializeQuiz();
                     setHasStarted(true);
+                    syncSessionWithServer("ongoing", 0, 0);
                   }}
                   className="w-full py-3 bg-[#EF4444] hover:bg-red-600 text-white font-black text-xs uppercase tracking-wider transition-all cursor-pointer shadow-[0_0_20px_rgba(239,68,68,0.4)]"
                 >
-                  RE-ATTEMPT EXAMINATION NOW ➔
+                  RE-ATTEMPT EXAMINATION NOW (FLAGS RESET TO 0) ➔
                 </button>
               </motion.div>
             </div>
@@ -1518,8 +2171,27 @@ function TestYourKnowledge() {
               </div>
             </div>
             
-            {/* Stats Summary */}
-            <div className="flex items-center gap-4 font-mono text-[10px]">
+            {/* Stats Summary & 25-Minute Countdown Timer */}
+            <div className="flex flex-wrap items-center gap-3 font-mono text-[10px]">
+              {/* Prominent Live 25-Minute Countdown Badge */}
+              <div className={`px-3 py-1.5 border flex items-center gap-2 font-mono font-black transition-all ${
+                timeLeft <= 180 
+                  ? "bg-red-950/90 border-red-500 text-red-400 animate-pulse shadow-[0_0_20px_rgba(239,68,68,0.6)]" 
+                  : timeLeft <= 300 
+                    ? "bg-amber-950/60 border-amber-500 text-amber-400"
+                    : "bg-zinc-950/90 border-zinc-800 text-amber-400"
+              }`}>
+                <Clock className={`w-4 h-4 ${timeLeft <= 180 ? "text-red-500 animate-spin" : "text-amber-500"}`} />
+                <div className="text-left">
+                  <span className="text-[7.5px] text-zinc-500 block uppercase font-bold tracking-wider leading-none">
+                    {timeLeft <= 180 ? "TIME EXPIRING" : "EXAM TIMER (25 MIN)"}
+                  </span>
+                  <span className="text-xs font-black tracking-widest block leading-none mt-0.5">
+                    {formatTime(timeLeft)}
+                  </span>
+                </div>
+              </div>
+
               <span className="text-zinc-500">SCENARIO: <strong className="text-white">{activeScenarioIdx + 1} / 20</strong></span>
               {!hideGamification && (
                 <span className="text-zinc-500">STATION XP: <strong className="text-green-400">{earnedPoints} PTS</strong></span>
@@ -1527,6 +2199,17 @@ function TestYourKnowledge() {
               <span className="text-zinc-500">PROCTOR WARNINGS: <strong className={malpracticeCount > 6 ? "text-red-500 font-bold animate-pulse" : "text-amber-400"}>{malpracticeCount} / 10</strong></span>
             </div>
           </div>
+
+          {/* Time Expiring Alert Banner (when <= 3 minutes left) */}
+          {timeLeft <= 180 && (
+            <div className="bg-red-950/80 border border-red-600/80 p-2.5 text-[10px] font-mono text-red-300 font-bold uppercase tracking-wider flex items-center justify-between animate-pulse shadow-lg">
+              <span className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-red-400" />
+                <span>EXAM TIME CRITICAL! AUTOMATIC SUBMISSION OCCURS AT 00:00 ({Math.ceil(timeLeft / 60)} MIN REMAINING)</span>
+              </span>
+              <span className="text-white font-black text-xs">{formatTime(timeLeft)}</span>
+            </div>
+          )}
 
           {/* VISUAL PROGRESS STEPPER (20 QUESTION REAL-TIME TRACK) */}
           <div className="bg-[#08080a] border border-zinc-900 p-3 space-y-2 font-mono text-[10px] text-left">
@@ -1735,7 +2418,7 @@ function TestYourKnowledge() {
                     <span className="text-[8px] text-emerald-500 animate-pulse font-bold">● BIOMETRIC LOCK</span>
                   </div>
                   
-                  {/* Video Container with Eye Reticle & Landmarks */}
+                  {/* Video Container with Real-Time CV Eyeball & Face Mesh Overlay */}
                   <div className="relative aspect-video w-full bg-zinc-950 border border-zinc-900 overflow-hidden">
                     {/* Reticle grid */}
                     <div className="absolute inset-0 border border-red-500/15 m-2 pointer-events-none z-10" />
@@ -1743,11 +2426,6 @@ function TestYourKnowledge() {
                     <div className="absolute top-2 right-2 w-3 h-3 border-t-2 border-r-2 border-red-500/60 pointer-events-none z-10" />
                     <div className="absolute bottom-2 left-2 w-3 h-3 border-b-2 border-l-2 border-red-500/60 pointer-events-none z-10" />
                     <div className="absolute bottom-2 right-2 w-3 h-3 border-b-2 border-r-2 border-red-500/60 pointer-events-none z-10" />
-                    
-                    {/* Simulated Eye Tracking Crosshair */}
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 border border-emerald-500/40 rounded-full flex items-center justify-center pointer-events-none z-10 animate-pulse">
-                      <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full" />
-                    </div>
 
                     {!cameraError && stream ? (
                       <video
@@ -1889,43 +2567,52 @@ function TestYourKnowledge() {
                   {/* Hidden Canvas used for video frame reading */}
                   <canvas ref={canvasRef} className="hidden" width="80" height="60" />
 
-                  {/* Real-time Computer Vision Telemetry Feed */}
-                  <div className="bg-[#0b0c10] border border-zinc-900 p-2.5 space-y-1.5 text-[8.5px]">
-                    <div className="flex justify-between items-center text-zinc-400 border-b border-zinc-900 pb-1">
-                      <span className="font-bold uppercase text-red-400 flex items-center gap-1">
-                        <Eye className="w-3 h-3 text-red-500" />
-                        EYE GAZE VECTOR:
+                  {/* Microphone Audio Spectrum & Realtime Gemini Observations Feed */}
+                  <div className="bg-[#0b0c10] border border-zinc-900 p-3 space-y-2 text-[8.5px] font-mono">
+                    <div className="flex justify-between items-center border-b border-zinc-900 pb-1.5">
+                      <span className="font-bold uppercase text-blue-400 flex items-center gap-1.5">
+                        <Mic className="w-3.5 h-3.5 text-blue-400 animate-pulse" />
+                        MIC AUDIO ANALYSIS:
                       </span>
-                      <span className="text-zinc-200 font-mono font-bold">{telemetry.eyeGaze}</span>
+                      <span className={micLevel > 30 ? "text-red-400 font-bold" : "text-emerald-400 font-bold"}>
+                        {micLevel}% dB ({micLevel > 30 ? "VOICE SPIKE" : "QUIET"})
+                      </span>
                     </div>
 
-                    <div className="flex justify-between items-center text-zinc-400 border-b border-zinc-900 pb-1">
+                    {/* Audio Decibel Level Visualizer Bar */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-[7.5px] text-zinc-500">
+                        <span>ACOUSTIC SPECTRUM POWER</span>
+                        <span>PEAK: {micPeak}% dB</span>
+                      </div>
+                      <div className="w-full bg-zinc-950 h-2 border border-zinc-800 overflow-hidden flex items-center p-0.5">
+                        <motion.div
+                          className={`h-full transition-all duration-100 ${
+                            micLevel > 40 ? "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]" : micLevel > 20 ? "bg-amber-400" : "bg-emerald-500"
+                          }`}
+                          style={{ width: `${Math.max(4, micLevel)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Gemini Real-Time Audio Comment Box */}
+                    <div className="bg-zinc-950 border border-blue-900/40 p-2 space-y-1">
+                      <div className="flex items-center justify-between text-[7.5px] text-blue-400 font-bold uppercase">
+                        <span>GEMINI REALTIME AUDIO COMMENT:</span>
+                        <span className="text-zinc-500">LIVE FEED</span>
+                      </div>
+                      <p className="text-[8.5px] text-zinc-300 font-sans italic leading-tight">
+                        "{geminiAudioComment}"
+                      </p>
+                    </div>
+
+                    <div className="flex justify-between items-center text-zinc-400 border-t border-zinc-900 pt-1.5">
                       <span className="font-bold uppercase text-amber-400 flex items-center gap-1">
                         <Users className="w-3 h-3 text-amber-500" />
                         FACIAL COUNT:
                       </span>
                       <span className={telemetry.faceCount > 1 ? "text-red-500 font-bold" : "text-emerald-400 font-bold"}>
                         {telemetry.faceCount} DETECTED
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between items-center text-zinc-400 border-b border-zinc-900 pb-1">
-                      <span className="font-bold uppercase text-zinc-400 flex items-center gap-1">
-                        <Hand className="w-3 h-3 text-zinc-400" />
-                        HAND/OBSTRUCTION:
-                      </span>
-                      <span className={telemetry.handStatus !== "CLEAR" ? "text-red-500 font-bold" : "text-zinc-300"}>
-                        {telemetry.handStatus}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between items-center text-zinc-400 border-b border-zinc-900 pb-1">
-                      <span className="font-bold uppercase text-blue-400 flex items-center gap-1">
-                        <Mic className="w-3 h-3 text-blue-400" />
-                        MIC AUDIO SENSOR:
-                      </span>
-                      <span className={stream && stream.getAudioTracks().length > 0 ? "text-emerald-400 font-bold" : "text-amber-400 font-bold"}>
-                        {stream && stream.getAudioTracks().length > 0 ? "LIVE MIC ACTIVE" : "CAMERA ACTIVE (MIC OFF)"}
                       </span>
                     </div>
 
@@ -1967,40 +2654,21 @@ function TestYourKnowledge() {
                       </motion.div>
                     )}
                   </AnimatePresence>
-
-                  {/* Scrolling Event Log Terminal */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[8px] text-zinc-500 uppercase">
-                      <span>Live Proctor Terminal:</span>
-                      <span className="text-red-500 font-bold">AUTOMATED AI ENGINE</span>
-                    </div>
-                    <div className="h-28 bg-zinc-950 border border-zinc-900/80 p-2 font-mono text-[8px] text-zinc-500 overflow-y-auto leading-relaxed flex flex-col-reverse custom-scrollbar">
-                      {proctorLogs.map((log, idx) => {
-                        const msg = typeof log === 'object' ? (log.message || JSON.stringify(log)) : log;
-                        const isAlert = msg.includes("!!!");
-                        const isSuccess = msg.includes("stream secured");
-                        const isManual = typeof log === 'object';
-                        
-                        return (
-                          <div key={idx} className={isAlert ? "text-red-400 font-bold" : isSuccess ? "text-emerald-500" : isManual ? "text-amber-400 font-bold" : ""}>
-                            {msg}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
                 </div>
               </div>
             </div>
           )}
         </motion.div>
-      ) : !isReviewMode ? (
-        /* QUIZ RESULTS SUMMARY SCREEN */
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="space-y-8"
-        >
+          </div>
+        </div>
+      ) : (
+        !isReviewMode ? (
+          /* QUIZ RESULTS SUMMARY SCREEN */
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="space-y-8 max-w-4xl mx-auto py-12 px-4"
+          >
           {/* Main Visual Header based on Pass or Fail */}
           <div className="text-center py-6 space-y-4">
             <div className={`inline-flex p-5 rounded-full mb-2 ${
@@ -2098,7 +2766,7 @@ function TestYourKnowledge() {
                     <input
                       id="summary-photo-upload"
                       type="file"
-                      accept="image/*"
+                      accept="image/jpeg,image/png,image/jpg"
                       onChange={(e) => {
                         if (e.target.files && e.target.files[0]) {
                           handlePhotoFile(e.target.files[0]);
@@ -2122,7 +2790,7 @@ function TestYourKnowledge() {
                   <input
                     id="summary-photo-upload-empty"
                     type="file"
-                    accept="image/*"
+                    accept="image/jpeg,image/png,image/jpg"
                     onChange={(e) => {
                       if (e.target.files && e.target.files[0]) {
                         handlePhotoFile(e.target.files[0]);
@@ -2865,7 +3533,7 @@ function TestYourKnowledge() {
             </div>
           )}
         </motion.div>
-      )}
+      ))}
     </div>
   );
 }

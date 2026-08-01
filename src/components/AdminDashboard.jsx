@@ -1454,14 +1454,18 @@ export default function AdminDashboard({ onClose }) {
                           <th className="py-3 px-2 font-black">ID TYPE</th>
                           <th className="py-3 px-2 font-black">CANDIDATE NAME</th>
                           <th className="py-3 px-2 font-black">JURISDICTION</th>
-                          
+                          <th className="py-3 px-2 font-black">SCORE %</th>
+                          <th className="py-3 px-2 font-black">CLEARANCE STATUS</th>
                           <th className="py-3 px-2 font-black">ISSUE DATE</th>
                           <th className="py-3 px-2 font-black">DOCUMENT REGISTRY ID</th>
                           <th className="py-3 px-2 font-black text-right">TELEMETRY ACTIONS</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {certResults.map((cert) => (
+                        {certResults.map((cert) => {
+                          const score = cert.finalScorePercent ?? 0;
+                          const passed = score >= 85;
+                          return (
                           <tr key={cert.id} className="border-b border-zinc-900/40 hover:bg-zinc-950/40">
                             <td className="py-3 px-2">
                               <span className="text-[8.5px] font-black uppercase px-2 py-0.5 border border-zinc-800 bg-zinc-900 text-zinc-300">
@@ -1470,7 +1474,22 @@ export default function AdminDashboard({ onClose }) {
                             </td>
                             <td className="py-3 px-2 font-bold text-zinc-100">{cert.userName}</td>
                             <td className="py-3 px-2 text-zinc-400">{cert.userState}</td>
-                            
+                            <td className="py-3 px-2 font-mono font-black">
+                              <span className={passed ? "text-emerald-400" : "text-red-500 font-black"}>
+                                {score}%
+                              </span>
+                            </td>
+                            <td className="py-3 px-2 font-mono">
+                              {passed ? (
+                                <span className="text-[8px] font-black px-1.5 py-0.5 border border-emerald-800 bg-emerald-950/40 text-emerald-400">
+                                  PASSED (≥85%)
+                                </span>
+                              ) : (
+                                <span className="text-[8px] font-black px-1.5 py-0.5 border border-red-800 bg-red-950/40 text-red-500 animate-pulse">
+                                  FAILED (&lt;85%)
+                                </span>
+                              )}
+                            </td>
                             <td className="py-3 px-2 text-zinc-400">{cert.certDate || "N/A"}</td>
                             <td className="py-3 px-2 text-zinc-300 font-bold">{cert.certCode}</td>
                             <td className="py-3 px-2 text-right">
@@ -1490,7 +1509,7 @@ export default function AdminDashboard({ onClose }) {
                                               background: #fff; 
                                               color: #000; 
                                               padding: 50px; 
-                                              border: 15px double #111; 
+                                              border: 15px double ${passed ? '#111' : '#dc2626'}; 
                                               position: relative;
                                               min-height: 90vh;
                                               box-sizing: border-box;
@@ -1498,22 +1517,22 @@ export default function AdminDashboard({ onClose }) {
                                               flex-direction: column;
                                               justify-content: space-between;
                                             }
-                                            h1 { font-size: 32px; font-weight: 900; margin: 20px 0 10px; text-transform: uppercase; }
+                                            h1 { font-size: 30px; font-weight: 900; margin: 20px 0 10px; text-transform: uppercase; }
                                             h3 { font-size: 16px; margin: 0; }
                                             p { font-size: 14px; line-height: 1.6; margin: 20px auto; max-width: 600px; }
-                                            .code { font-size: 20px; font-weight: bold; margin: 30px auto; color: #000; border: 1px dashed #000; padding: 10px 20px; display: inline-block; }
-                                            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 30px auto; text-align: left; max-width: 500px; border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 20px 0; }
+                                            .code { font-size: 18px; font-weight: bold; margin: 25px auto; color: #000; border: 1px dashed #000; padding: 10px 20px; display: inline-block; }
+                                            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 25px auto; text-align: left; max-width: 550px; border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 15px 0; font-size: 13px; }
                                             .watermark {
                                               position: absolute;
                                               top: 50%;
                                               left: 50%;
                                               transform: translate(-50%, -50%) rotate(-30deg);
-                                              font-size: 64px;
-                                              color: rgba(239, 68, 68, 0.12); /* semi-transparent red */
+                                              font-size: 56px;
+                                              color: ${passed ? 'rgba(239, 68, 68, 0.12)' : 'rgba(220, 38, 38, 0.28)'};
                                               font-weight: 900;
                                               text-transform: uppercase;
-                                              letter-spacing: 12px;
-                                              border: 12px solid rgba(239, 68, 68, 0.12);
+                                              letter-spacing: 8px;
+                                              border: 10px solid ${passed ? 'rgba(239, 68, 68, 0.12)' : 'rgba(220, 38, 38, 0.28)'};
                                               padding: 15px 30px;
                                               pointer-events: none;
                                               white-space: nowrap;
@@ -1521,21 +1540,21 @@ export default function AdminDashboard({ onClose }) {
                                               z-index: 1000;
                                             }
                                             .admin-header-tag {
-                                              background-color: #fee2e2; 
-                                              border: 1px solid #ef4444; 
-                                              color: #b91c1c; 
-                                              font-size: 11px; 
+                                              background-color: ${passed ? '#ecfdf5' : '#fef2f2'}; 
+                                              border: 2px solid ${passed ? '#10b981' : '#ef4444'}; 
+                                              color: ${passed ? '#047857' : '#b91c1c'}; 
+                                              font-size: 12px; 
                                               font-weight: bold; 
-                                              padding: 6px 14px; 
+                                              padding: 8px 16px; 
                                               text-transform: uppercase; 
-                                              margin-bottom: 20px; 
+                                              margin-bottom: 15px; 
                                               display: inline-block;
                                               letter-spacing: 1px;
                                             }
                                             .sig-block {
                                               display: flex;
                                               justify-content: space-between;
-                                              margin-top: 40px;
+                                              margin-top: 30px;
                                               font-size: 9px;
                                               font-weight: bold;
                                               text-transform: uppercase;
@@ -1550,18 +1569,22 @@ export default function AdminDashboard({ onClose }) {
                                           </style>
                                         </head>
                                         <body>
-                                          <div class="watermark">ADMIN COPY</div>
+                                          <div class="watermark">${passed ? "ADMIN COPY" : "EXAM FAILED (<85%)"}</div>
                                           <div>
-                                            <div class="admin-header-tag">⚠️ ADMIN COPY - FOR MUNICIPAL RECORD SYSTEMS ONLY</div>
+                                            <div class="admin-header-tag">
+                                              ${passed ? `✅ ADMIN COPY - OFFICIAL PASSED RECORD (${score}%)` : `❌ ADMIN COPY - EXAM FAILED (${score}% SCORE < 85% MINIMUM)`}
+                                            </div>
                                             <h1>NATIONAL COMPLIANCE CREDENTIAL</h1>
                                             <h3>BUILT TO BREAK MUNICIPAL RESEARCH INITIATIVE</h3>
-                                            <p>This document verifies that candidate <strong>${cert.userName}</strong> has undergone exhaustive training and evaluation in the rules set forth by the National Building Code (NBC) and the Bharatiya Nyaya Sanhita (BNS) fire ordinances.</p>
+                                            <p>Candidate <strong>${cert.userName}</strong> scored <strong>${score}%</strong> on the NBC & BNS Compliance Forensic Assessment. Minimum passing mark required: <strong>85%</strong>.</p>
                                             
                                             <div class="grid">
                                               <div><strong>JURISDICTION:</strong> ${cert.userState}</div>
                                               <div><strong>ID NUMBER (MAPPED):</strong> ${cert.idNumber || "Aadhaar System"}</div>
-                                              
+                                              <div><strong>PERCENTAGE SCORE:</strong> <strong style="color: ${passed ? '#047857' : '#b91c1c'}">${score}%</strong></div>
+                                              <div><strong>RESULT STATUS:</strong> <strong style="color: ${passed ? '#047857' : '#b91c1c'}">${passed ? 'PASSED (≥85%)' : 'FAILED (<85%) - INVALID'}</strong></div>
                                               <div><strong>ISSUE TIMESTAMP:</strong> ${cert.certDate}</div>
+                                              <div><strong>DOCUMENT CODE:</strong> ${cert.certCode}</div>
                                             </div>
                                           </div>
 
@@ -1585,7 +1608,8 @@ export default function AdminDashboard({ onClose }) {
                               </button>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   )}

@@ -235,9 +235,14 @@ export default function App() {
     }
   }, [isCriticalNarrowingActive, isAudioPlaying]);
 
-  // Clean up audio on unmount
+  // Clean up audio on unmount and subscribe to global audioEngine state
   useEffect(() => {
+    setIsAudioPlaying(audioEngine.getIsPlaying());
+    const unsubscribe = audioEngine.subscribe(({ isPlaying }) => {
+      setIsAudioPlaying(isPlaying);
+    });
     return () => {
+      unsubscribe();
       audioEngine.stop();
     };
   }, []);
@@ -458,13 +463,20 @@ export default function App() {
       </div>
 
       {/* Floating Header */}
-      <header className="fixed top-0 left-0 right-0 z-40 bg-[#0A0A0A]/90 backdrop-blur-md border-b border-zinc-900 px-6 py-4" id="app-main-header">
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <div className="flex items-center gap-2.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#EF4444]" />
-            <span className="text-xs font-black tracking-[0.3em] uppercase font-mono text-zinc-100">
-              BUILT_TO_BREAK
-            </span>
+      <header className="fixed top-0 left-0 right-0 z-50 bg-[#0A0A0A]/90 backdrop-blur-md border-b border-zinc-900 px-4 sm:px-6 py-3.5" id="app-main-header">
+        <div className="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-3">
+          <div className="flex items-center gap-3.5">
+            <div className="flex items-center gap-2.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#EF4444]" />
+              <span className="text-xs font-black tracking-[0.3em] uppercase font-mono text-zinc-100">
+                BUILT_TO_BREAK
+              </span>
+            </div>
+
+            <div className="hidden sm:block h-4 w-[1px] bg-zinc-800" />
+
+            {/* Gamified Audit Rank HUD placed right next to BUILT_TO_BREAK */}
+            <GamificationHUD />
           </div>
           <div className="flex items-center gap-3 md:gap-4 font-mono">
             <button
@@ -1332,9 +1344,6 @@ export default function App() {
           />
         )}
       </AnimatePresence>
-
-      {/* Floating Gamification / Forensic XP HUD */}
-      <GamificationHUD />
 
     </div>
   );
