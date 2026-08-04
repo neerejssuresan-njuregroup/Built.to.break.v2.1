@@ -32,10 +32,18 @@ class AudioEngine {
     return () => this.listeners.delete(listener);
   }
 
+  getIsAudible() {
+    return this.isPlaying && !this.isMuted;
+  }
+
   notifyListeners() {
     this.listeners.forEach(listener => {
       try {
-        listener({ isPlaying: this.isPlaying, isMuted: this.isMuted });
+        listener({ 
+          isPlaying: this.isPlaying, 
+          isMuted: this.isMuted,
+          isAudible: this.getIsAudible()
+        });
       } catch (e) {}
     });
   }
@@ -261,8 +269,19 @@ class AudioEngine {
     this.notifyListeners();
   }
 
+  toggleAudio() {
+    if (this.getIsAudible()) {
+      this.setMuted(true);
+    } else {
+      this.setMuted(false);
+      if (!this.isPlaying) {
+        this.start();
+      }
+    }
+  }
+
   toggleMute() {
-    this.setMuted(!this.isMuted);
+    this.toggleAudio();
   }
 
   getIsMuted() {

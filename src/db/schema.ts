@@ -75,14 +75,60 @@ export const ongoingSessions = pgTable("ongoing_sessions", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+// Define the 'support_tickets' table
+export const supportTickets = pgTable("support_tickets", {
+  id: serial("id").primaryKey(),
+  ticketCode: text("ticket_code").notNull().unique(),
+  userId: integer("user_id").references(() => users.id),
+  email: text("email").notNull(),
+  phone: text("phone").notNull(),
+  name: text("name").notNull(),
+  category: text("category").notNull(), // Technical Issue, Exam Proctoring Appeal, Account & Certificate, General Support
+  priority: text("priority").notNull(), // P1 - Critical, P2 - High, P3 - Medium, P4 - Low
+  subject: text("subject").notNull(),
+  description: text("description").notNull(),
+  status: text("status").notNull().default("Open"), // Open, In Progress, Pending User Response, Resolved, Closed
+  assignedTo: text("assigned_to").default("System Admin"),
+  taskId: text("task_id"), // Google Tasks Task ID if synced
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// Define the 'ticket_updates' table
+export const ticketUpdates = pgTable("ticket_updates", {
+  id: serial("id").primaryKey(),
+  ticketId: integer("ticket_id").references(() => supportTickets.id).notNull(),
+  author: text("author").notNull(), // 'User', 'Admin', 'System'
+  authorName: text("author_name"),
+  message: text("message").notNull(),
+  statusChange: text("status_change"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // Relations
 export const usersRelations = relations(users, ({ many }) => ({
   certificates: many(certificates),
+  supportTickets: many(supportTickets),
 }));
 
 export const certificatesRelations = relations(certificates, ({ one }) => ({
   user: one(users, {
     fields: [certificates.userId],
     references: [users.id],
+  }),
+}));
+
+export const supportTicketsRelations = relations(supportTickets, ({ one, many }) => ({
+  user: one(users, {
+    fields: [supportTickets.userId],
+    references: [users.id],
+  }),
+  updates: many(ticketUpdates),
+}));
+
+export const ticketUpdatesRelations = relations(ticketUpdates, ({ one }) => ({
+  ticket: one(supportTickets, {
+    fields: [ticketUpdates.ticketId],
+    references: [supportTickets.id],
   }),
 }));

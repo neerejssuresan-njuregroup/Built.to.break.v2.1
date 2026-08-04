@@ -5,8 +5,8 @@ import { Server as SocketIOServer } from "socket.io";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import { db } from "./src/db/index.ts";
-import { users, certificates, questions, admins, ongoingSessions } from "./src/db/schema.ts";
-import { eq, sql } from "drizzle-orm";
+import { users, certificates, questions, admins, ongoingSessions, supportTickets, ticketUpdates } from "./src/db/schema.ts";
+import { eq, sql, desc } from "drizzle-orm";
 import { adminAuth } from "./src/lib/firebase-admin.ts";
 import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
 import { FALLBACK_QUESTIONS } from "./src/questionsData.js";
@@ -892,6 +892,201 @@ Return a JSON object adhering to this schema:
     } catch (error: any) {
       console.error("Database fetch my certificates error:", error);
       res.status(500).json({ error: "Failed to fetch certificates", details: error.message });
+    }
+  });
+
+  // ==========================================
+  // ITSM SUPPORT TICKETS API ROUTES
+  // ==========================================
+
+  // Create Support Ticket
+  app.post("/api/support/tickets", async (req, res) => {
+    try {
+      const { name, email, phone, category, priority, subject, description, taskId } = req.body;
+
+      if (!name || !email || !phone || !subject || !description) {
+        return res.status(400).json({ error: "Missing required fields (name, email, phone, subject, description)" });
+      }
+
+      let dbUserId: number | null = null;
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        const token = authHeader.split("Bearer ")[1];
+        try {
+          const decodedToken = await adminAuth.verifyIdToken(token);
+          const uid = decodedToken.uid;
+          const userResult = await db.select().from(users).where(eq(users.uid, uid)).limit(1);
+          if (userResult.length > 0) {
+            dbUserId = userResult[0].id;
+          }
+        } catch (authErr) {
+          console.warn("[ITSM] Auth token check for ticket submission:", authErr);
+        }
+      }
+
+      const randomNum = Math.floor(100000 + Math.random() * 900000);
+      const ticketCode = `TKT-${randomNum}`;
+
+      const [newTicket] = await db.insert(supportTickets).values({
+        ticketCode,
+        userId: dbUserId,
+        email: email.trim(),
+        phone: phone.trim(),
+        name: name.trim(),
+        category: category || "General Support",
+        priority: priority || "P3 - Medium",
+        subject: subject.trim(),
+        description: description.trim(),
+        status: "Open",
+        assignedTo: "System Admin",
+        taskId: taskId || null
+      }).returning();
+
+      // Create initial update entry
+      await db.insert(ticketUpdates).values({
+        ticketId: newTicket.id,
+        author: "User",
+        authorName: name.trim(),
+        message: `Ticket logged: ${description.trim()}`,
+        statusChange: "Open"
+      });
+
+      console.log(`[ITSM] Support ticket logged successfully: ${ticketCode}`);
+      res.json({ success: true, ticket: newTicket });
+    } catch (error: any) {
+      console.error("[ITSM] Create ticket error:", error);
+      res.status(500).json({ error: "Failed to log support ticket", details: error.message });
+    }
+  });
+
+  // Track Ticket by Code (Public)
+  app.get("/api/support/tickets/track/:ticketCode", async (req, res) => {
+    try {
+      const { ticketCode } = req.params;
+      const cleanCode = ticketCode.trim().toUpperCase();
+
+      const ticketResult = await db.select().from(supportTickets).where(eq(supportTickets.ticketCode, cleanCode)).limit(1);
+      if (ticketResult.length === 0) {
+        return res.status(404).json({ error: "Support ticket not found" });
+      }
+
+      const updates = await db.select()
+        .from(ticketUpdates)
+        .where(eq(ticketUpdates.ticketId, ticketResult[0].id))
+        .orderBy(desc(ticketUpdates.createdAt));
+
+      res.json({ success: true, ticket: ticketResult[0], updates });
+    } catch (error: any) {
+      console.error("[ITSM] Track ticket error:", error);
+      res.status(500).json({ error: "Failed to fetch ticket status" });
+    }
+  });
+
+  // Get My Support Tickets (Logged-in User)
+  app.get("/api/support/tickets/my", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const uid = req.user.uid;
+      const dbUser = await db.select().from(users).where(eq(users.uid, uid)).limit(1);
+      if (dbUser.length === 0) {
+        return res.json([]);
+      }
+
+      const userTickets = await db.select()
+        .from(supportTickets)
+        .where(eq(supportTickets.userId, dbUser[0].id))
+        .orderBy(desc(supportTickets.createdAt));
+
+      // Map ticket IDs to fetch updates
+      const ticketIds = userTickets.map(t => t.id);
+      let allUpdates: any[] = [];
+      if (ticketIds.length > 0) {
+        allUpdates = await db.select()
+          .from(ticketUpdates)
+          .orderBy(desc(ticketUpdates.createdAt));
+      }
+
+      const enrichedTickets = userTickets.map(t => ({
+        ...t,
+        updates: allUpdates.filter(u => u.ticketId === t.id)
+      }));
+
+      res.json(enrichedTickets);
+    } catch (error: any) {
+      console.error("[ITSM] Get my tickets error:", error);
+      res.status(500).json({ error: "Failed to fetch support tickets" });
+    }
+  });
+
+  // Get All Support Tickets (Admin Only)
+  app.get("/api/support/admin/tickets", requireAdmin, async (req, res) => {
+    try {
+      const ticketsList = await db.select().from(supportTickets).orderBy(desc(supportTickets.createdAt));
+      const updatesList = await db.select().from(ticketUpdates).orderBy(desc(ticketUpdates.createdAt));
+
+      const enriched = ticketsList.map(t => ({
+        ...t,
+        updates: updatesList.filter(u => u.ticketId === t.id)
+      }));
+
+      res.json(enriched);
+    } catch (error: any) {
+      console.error("[ITSM] Admin fetch tickets error:", error);
+      res.status(500).json({ error: "Failed to fetch admin support tickets" });
+    }
+  });
+
+  // Update Support Ticket Status & Add Response (Admin Only)
+  app.post("/api/support/admin/tickets/:ticketId/update", requireAdmin, async (req, res) => {
+    try {
+      const ticketId = parseInt(req.params.ticketId, 10);
+      const { status, message, assignedTo } = req.body;
+
+      const existing = await db.select().from(supportTickets).where(eq(supportTickets.id, ticketId)).limit(1);
+      if (existing.length === 0) {
+        return res.status(404).json({ error: "Ticket not found" });
+      }
+
+      const newStatus = status || existing[0].status;
+      const newAssigned = assignedTo || existing[0].assignedTo;
+
+      await db.update(supportTickets)
+        .set({
+          status: newStatus,
+          assignedTo: newAssigned,
+          updatedAt: new Date()
+        })
+        .where(eq(supportTickets.id, ticketId));
+
+      if (message || status) {
+        await db.insert(ticketUpdates).values({
+          ticketId,
+          author: "Admin",
+          authorName: "ITSM Admin",
+          message: message || `Status updated to ${newStatus}`,
+          statusChange: newStatus
+        });
+      }
+
+      const updatedTicket = await db.select().from(supportTickets).where(eq(supportTickets.id, ticketId)).limit(1);
+      const updates = await db.select().from(ticketUpdates).where(eq(ticketUpdates.ticketId, ticketId)).orderBy(desc(ticketUpdates.createdAt));
+
+      res.json({ success: true, ticket: updatedTicket[0], updates });
+    } catch (error: any) {
+      console.error("[ITSM] Update ticket error:", error);
+      res.status(500).json({ error: "Failed to update support ticket" });
+    }
+  });
+
+  // Delete Support Ticket (Admin Only)
+  app.delete("/api/support/admin/tickets/:ticketId", requireAdmin, async (req, res) => {
+    try {
+      const ticketId = parseInt(req.params.ticketId, 10);
+      await db.delete(ticketUpdates).where(eq(ticketUpdates.ticketId, ticketId));
+      await db.delete(supportTickets).where(eq(supportTickets.id, ticketId));
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[ITSM] Delete ticket error:", error);
+      res.status(500).json({ error: "Failed to delete support ticket" });
     }
   });
 

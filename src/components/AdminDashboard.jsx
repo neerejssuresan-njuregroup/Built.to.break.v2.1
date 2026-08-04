@@ -30,8 +30,14 @@ import {
   Activity,
   FileText,
   UserCheck,
-  DownloadCloud
+  DownloadCloud,
+  LifeBuoy,
+  Mail,
+  Phone,
+  MessageSquare,
+  Send
 } from "lucide-react";
+import { getAccessToken, sendTicketStatusUpdateEmail } from "../lib/googleWorkspace";
 
 export default function AdminDashboard({ onClose }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -82,6 +88,17 @@ export default function AdminDashboard({ onClose }) {
   const [certSearchQuery, setCertSearchQuery] = useState("");
   const [certResults, setCertResults] = useState([]);
   const [isSearchingCerts, setIsSearchingCerts] = useState(false);
+
+  // State for ITSM Support Tickets
+  const [supportTickets, setSupportTickets] = useState([]);
+  const [selectedTicket, setSelectedTicket] = useState(null);
+  const [isFetchingTickets, setIsFetchingTickets] = useState(false);
+  const [ticketFilterStatus, setTicketFilterStatus] = useState("ALL");
+  const [ticketSearchQuery, setTicketSearchQuery] = useState("");
+  const [ticketResponseMsg, setTicketResponseMsg] = useState("");
+  const [ticketNewStatus, setTicketNewStatus] = useState("");
+  const [ticketNewAssignee, setTicketNewAssignee] = useState("");
+  const [isUpdatingTicket, setIsUpdatingTicket] = useState(false);
   
   const [liveFrames, setLiveFrames] = useState({});
 
@@ -238,6 +255,101 @@ export default function AdminDashboard({ onClose }) {
       handleCertSearch();
     }
   }, [isAuthenticated, activeTab]);
+
+  // Fetch Support Tickets
+  const fetchSupportTickets = async () => {
+    if (!token) return;
+    setIsFetchingTickets(true);
+    try {
+      const res = await fetch("/api/support/admin/tickets", {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSupportTickets(data);
+        if (selectedTicket) {
+          const updatedSelected = data.find(t => t.id === selectedTicket.id);
+          if (updatedSelected) setSelectedTicket(updatedSelected);
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to fetch admin support tickets:", e);
+    } finally {
+      setIsFetchingTickets(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated && activeTab === "support") {
+      fetchSupportTickets();
+    }
+  }, [isAuthenticated, activeTab]);
+
+  // Update Support Ticket Status & Post Admin Response
+  const handleUpdateTicket = async (e) => {
+    if (e) e.preventDefault();
+    if (!selectedTicket) return;
+
+    setIsUpdatingTicket(true);
+    try {
+      const res = await fetch(`/api/support/admin/tickets/${selectedTicket.id}/update`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          status: ticketNewStatus || selectedTicket.status,
+          message: ticketResponseMsg.trim() || undefined,
+          assignedTo: ticketNewAssignee || selectedTicket.assignedTo
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const updatedTicket = data.ticket;
+
+        // Send automated notification via Gmail API if OAuth token is available
+        const googleToken = getAccessToken();
+        if (googleToken && updatedTicket && ticketResponseMsg.trim()) {
+          try {
+            await sendTicketStatusUpdateEmail(
+              googleToken,
+              updatedTicket,
+              ticketResponseMsg.trim(),
+              ticketNewStatus || selectedTicket.status
+            );
+          } catch (mErr) {
+            console.warn("Gmail notification failed:", mErr);
+          }
+        }
+
+        setTicketResponseMsg("");
+        await fetchSupportTickets();
+      }
+    } catch (err) {
+      console.error("Admin update ticket failed:", err);
+    } finally {
+      setIsUpdatingTicket(false);
+    }
+  };
+
+  // Delete Support Ticket
+  const handleDeleteTicket = async (ticketId) => {
+    if (!window.confirm("Are you sure you want to permanently delete this support ticket from the system?")) return;
+    try {
+      const res = await fetch(`/api/support/admin/tickets/${ticketId}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        if (selectedTicket?.id === ticketId) setSelectedTicket(null);
+        await fetchSupportTickets();
+      }
+    } catch (err) {
+      console.error("Delete support ticket error:", err);
+    }
+  };
 
   // Handle Search Certificates
   const handleCertSearch = async (e) => {
@@ -997,6 +1109,17 @@ export default function AdminDashboard({ onClose }) {
               >
                 Certificates Search
               </button>
+              <button
+                onClick={() => setActiveTab("support")}
+                className={`px-4 py-2 text-[10.5px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5 ${
+                  activeTab === "support"
+                    ? "bg-sky-950/50 text-sky-400 border border-sky-800/40"
+                    : "text-zinc-500 hover:text-white"
+                }`}
+              >
+                <LifeBuoy className="w-3.5 h-3.5" />
+                <span>Support Tickets ({supportTickets.length})</span>
+              </button>
             </div>
 
             <div className="flex items-center gap-3">
@@ -1613,6 +1736,281 @@ export default function AdminDashboard({ onClose }) {
                       </tbody>
                     </table>
                   )}
+                </div>
+
+              </div>
+            )}
+
+            {/* TAB 4: ITSM SUPPORT TICKETS MANAGEMENT */}
+            {activeTab === "support" && (
+              <div className="space-y-6 font-mono text-xs">
+                
+                {/* Search & Filter Bar */}
+                <div className="bg-[#08080a] border border-zinc-900 p-4 flex flex-wrap items-center justify-between gap-4">
+                  
+                  <div className="flex items-center gap-2 flex-1 min-w-[280px]">
+                    <Search className="w-4 h-4 text-zinc-500" />
+                    <input
+                      type="text"
+                      value={ticketSearchQuery}
+                      onChange={(e) => setTicketSearchQuery(e.target.value)}
+                      placeholder="Filter by Ticket Code, Email, Phone, or Subject..."
+                      className="w-full bg-zinc-950 border border-zinc-900 px-3 py-1.5 text-xs text-zinc-100 focus:outline-none focus:border-sky-500 font-mono"
+                    />
+                  </div>
+
+                  {/* Filter Pills */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {["ALL", "Open", "In Progress", "Pending User Response", "Resolved", "Closed"].map((st) => (
+                      <button
+                        key={st}
+                        onClick={() => setTicketFilterStatus(st)}
+                        className={`px-3 py-1 text-[10px] font-bold uppercase transition-all cursor-pointer border ${
+                          ticketFilterStatus === st
+                            ? "bg-sky-950 text-sky-300 border-sky-600/60"
+                            : "bg-zinc-950 text-zinc-500 border-zinc-900 hover:text-zinc-300"
+                        }`}
+                      >
+                        {st}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={fetchSupportTickets}
+                    className="p-1.5 bg-zinc-950 border border-zinc-900 hover:border-zinc-700 text-zinc-300 hover:text-white cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isFetchingTickets ? "animate-spin" : ""}`} />
+                  </button>
+                </div>
+
+                {/* Main Tickets Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                  
+                  {/* Left Column: Tickets List */}
+                  <div className="lg:col-span-5 bg-[#08080a] border border-zinc-900 p-4 space-y-3 max-h-[650px] overflow-y-auto">
+                    <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest border-b border-zinc-900 pb-2 flex justify-between">
+                      <span>INCIDENT QUEUE ({supportTickets.length})</span>
+                      <span>SORT: NEWEST</span>
+                    </div>
+
+                    {supportTickets.filter(t => {
+                      if (ticketFilterStatus !== "ALL" && t.status !== ticketFilterStatus) return false;
+                      if (!ticketSearchQuery.trim()) return true;
+                      const q = ticketSearchQuery.toLowerCase();
+                      return (
+                        t.ticketCode?.toLowerCase().includes(q) ||
+                        t.email?.toLowerCase().includes(q) ||
+                        t.name?.toLowerCase().includes(q) ||
+                        t.phone?.toLowerCase().includes(q) ||
+                        t.subject?.toLowerCase().includes(q)
+                      );
+                    }).length === 0 ? (
+                      <div className="text-center py-12 text-zinc-600 text-[10px] uppercase">
+                        NO TICKETS MATCHING SPECIFIED CRITERIA
+                      </div>
+                    ) : (
+                      supportTickets.filter(t => {
+                        if (ticketFilterStatus !== "ALL" && t.status !== ticketFilterStatus) return false;
+                        if (!ticketSearchQuery.trim()) return true;
+                        const q = ticketSearchQuery.toLowerCase();
+                        return (
+                          t.ticketCode?.toLowerCase().includes(q) ||
+                          t.email?.toLowerCase().includes(q) ||
+                          t.name?.toLowerCase().includes(q) ||
+                          t.phone?.toLowerCase().includes(q) ||
+                          t.subject?.toLowerCase().includes(q)
+                        );
+                      }).map((t) => {
+                        const isSelected = selectedTicket?.id === t.id;
+                        return (
+                          <div
+                            key={t.id}
+                            onClick={() => {
+                              setSelectedTicket(t);
+                              setTicketNewStatus(t.status);
+                              setTicketNewAssignee(t.assignedTo || "System Admin");
+                            }}
+                            className={`p-3.5 border transition-all cursor-pointer space-y-2 ${
+                              isSelected
+                                ? "bg-sky-950/30 border-sky-500/70"
+                                : "bg-zinc-950 border-zinc-900 hover:border-zinc-800"
+                            }`}
+                          >
+                            <div className="flex justify-between items-center text-[10px]">
+                              <span className="text-amber-400 font-bold">{t.ticketCode}</span>
+                              <span className={`px-2 py-0.5 border text-[9px] font-bold uppercase ${
+                                t.status === "Open" ? "bg-amber-950/60 text-amber-300 border-amber-600/50" :
+                                t.status === "In Progress" ? "bg-sky-950/60 text-sky-300 border-sky-600/50" :
+                                t.status === "Resolved" ? "bg-emerald-950/60 text-emerald-300 border-emerald-600/50" :
+                                "bg-zinc-900 text-zinc-400 border-zinc-700"
+                              }`}>
+                                {t.status}
+                              </span>
+                            </div>
+
+                            <div className="font-bold text-zinc-100 line-clamp-1">
+                              {t.subject}
+                            </div>
+
+                            <div className="flex justify-between items-center text-[9.5px] text-zinc-500 pt-1 border-t border-zinc-900">
+                              <span>{t.name} ({t.category})</span>
+                              <span>{new Date(t.createdAt).toLocaleDateString()}</span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Right Column: Ticket Inspection & Response Panel */}
+                  <div className="lg:col-span-7 bg-[#08080a] border border-zinc-900 p-6 space-y-6">
+                    {selectedTicket ? (
+                      <div className="space-y-6">
+                        
+                        {/* Header Details */}
+                        <div className="border-b border-zinc-900 pb-4 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-amber-400 font-bold text-base">{selectedTicket.ticketCode}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="px-2.5 py-1 bg-red-950/60 text-red-400 border border-red-600/50 text-[10px] font-bold">
+                                {selectedTicket.priority}
+                              </span>
+                              <span className="px-2.5 py-1 bg-sky-950/60 text-sky-300 border border-sky-600/50 text-[10px] font-bold">
+                                {selectedTicket.status}
+                              </span>
+                              <button
+                                onClick={() => handleDeleteTicket(selectedTicket.id)}
+                                className="p-1.5 bg-zinc-950 border border-zinc-900 hover:border-red-600 text-zinc-500 hover:text-red-400 cursor-pointer"
+                                title="Delete Ticket"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+
+                          <h2 className="text-sm font-bold text-zinc-100">{selectedTicket.subject}</h2>
+
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[10px] bg-zinc-950 p-3 border border-zinc-900 text-zinc-400">
+                            <div><strong className="text-zinc-300">Name:</strong> {selectedTicket.name}</div>
+                            <div><strong className="text-zinc-300">Email:</strong> {selectedTicket.email}</div>
+                            <div><strong className="text-zinc-300">Phone:</strong> {selectedTicket.phone}</div>
+                            <div><strong className="text-zinc-300">Category:</strong> {selectedTicket.category}</div>
+                            <div><strong className="text-zinc-300">Assigned To:</strong> {selectedTicket.assignedTo}</div>
+                            <div><strong className="text-zinc-300">Created:</strong> {new Date(selectedTicket.createdAt).toLocaleString()}</div>
+                          </div>
+                        </div>
+
+                        {/* Description */}
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+                            USER DESCRIPTION:
+                          </span>
+                          <div className="p-3 bg-zinc-950 border border-zinc-900 text-zinc-200 leading-relaxed whitespace-pre-wrap">
+                            {selectedTicket.description}
+                          </div>
+                        </div>
+
+                        {/* Admin Action Form */}
+                        <form onSubmit={handleUpdateTicket} className="bg-zinc-950 border border-zinc-900 p-4 space-y-4">
+                          <span className="text-[10px] font-black text-sky-400 uppercase tracking-widest block border-b border-zinc-900 pb-1.5 flex items-center gap-1.5">
+                            <MessageSquare className="w-3.5 h-3.5" />
+                            POST ADMINISTRATOR RESPONSE & UPDATE STATUS
+                          </span>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[9.5px] text-zinc-500 uppercase mb-1">SET TICKET STATUS:</label>
+                              <select
+                                value={ticketNewStatus || selectedTicket.status}
+                                onChange={(e) => setTicketNewStatus(e.target.value)}
+                                className="w-full bg-[#08080a] border border-zinc-800 px-3 py-1.5 text-zinc-100 focus:outline-none focus:border-sky-500 text-xs"
+                              >
+                                <option value="Open">Open</option>
+                                <option value="In Progress">In Progress</option>
+                                <option value="Pending User Response">Pending User Response</option>
+                                <option value="Resolved">Resolved</option>
+                                <option value="Closed">Closed</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-[9.5px] text-zinc-500 uppercase mb-1">ASSIGNED ADMIN OPERATOR:</label>
+                              <select
+                                value={ticketNewAssignee || selectedTicket.assignedTo}
+                                onChange={(e) => setTicketNewAssignee(e.target.value)}
+                                className="w-full bg-[#08080a] border border-zinc-800 px-3 py-1.5 text-zinc-100 focus:outline-none focus:border-sky-500 text-xs"
+                              >
+                                <option value="System Admin">System Admin</option>
+                                <option value="Proctoring Specialist Admin">Proctoring Specialist Admin</option>
+                                <option value="Chief Compliance Officer">Chief Compliance Officer</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[9.5px] text-zinc-500 uppercase mb-1">RESPONSE NOTE / EMAIL MESSAGE TO USER:</label>
+                            <textarea
+                              rows={3}
+                              value={ticketResponseMsg}
+                              onChange={(e) => setTicketResponseMsg(e.target.value)}
+                              placeholder="Write admin status response or resolution note..."
+                              className="w-full bg-[#08080a] border border-zinc-800 p-2 text-zinc-100 focus:outline-none focus:border-sky-500 text-xs resize-none"
+                            />
+                          </div>
+
+                          <div className="flex justify-between items-center pt-1">
+                            <span className="text-[10px] text-zinc-500">
+                              * Submitting dispatches notification via Email
+                            </span>
+                            <button
+                              type="submit"
+                              disabled={isUpdatingTicket}
+                              className="px-5 py-2 bg-sky-600 hover:bg-sky-500 text-white font-bold uppercase tracking-widest text-[10.5px] flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                            >
+                              {isUpdatingTicket ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                              <span>UPDATE & DISPATCH MAIL</span>
+                            </button>
+                          </div>
+                        </form>
+
+                        {/* History Updates */}
+                        <div className="space-y-2">
+                          <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block">
+                            HISTORIC TICKET MESSAGES ({selectedTicket.updates?.length || 0})
+                          </span>
+                          {(!selectedTicket.updates || selectedTicket.updates.length === 0) ? (
+                            <div className="p-3 bg-zinc-950 text-zinc-600 text-center text-[10px]">
+                              NO PREVIOUS RESPONSES RECORDED FOR THIS INCIDENT
+                            </div>
+                          ) : (
+                            <div className="space-y-2 max-h-[220px] overflow-y-auto">
+                              {selectedTicket.updates.map((u, idx) => (
+                                <div key={idx} className="p-3 bg-zinc-950 border border-zinc-900 space-y-1">
+                                  <div className="flex justify-between items-center text-[9.5px]">
+                                    <span className="text-sky-400 font-bold">{u.authorName || u.author}</span>
+                                    <span className="text-zinc-500">{new Date(u.createdAt).toLocaleString()}</span>
+                                  </div>
+                                  <p className="text-zinc-300 leading-relaxed">{u.message}</p>
+                                  {u.statusChange && (
+                                    <div className="text-[9px] text-emerald-400 pt-1 border-t border-zinc-900">
+                                      Status updated to: <strong>{u.statusChange}</strong>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                      </div>
+                    ) : (
+                      <div className="text-center py-32 text-zinc-600 font-mono text-[10.5px] uppercase">
+                        SELECT A SUPPORT TICKET FROM THE LEFT QUEUE TO REVIEW & RESPOND
+                      </div>
+                    )}
+                  </div>
+
                 </div>
 
               </div>

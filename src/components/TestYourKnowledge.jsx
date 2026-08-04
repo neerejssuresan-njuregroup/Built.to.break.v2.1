@@ -241,6 +241,7 @@ function TestYourKnowledge() {
   const canvasRef = React.useRef(null);
   const micVolumeRef = React.useRef(0);
   const audioCtxRef = React.useRef(null);
+  const noFaceTimestampRef = React.useRef(null);
 
   const [malpracticeCount, setMalpracticeCount] = useState(0);
   const [hideGamification, setHideGamification] = useState(false);
@@ -688,11 +689,11 @@ function TestYourKnowledge() {
 
               // 2. Accurate Cause Analysis:
               // - Cooldown: 6 seconds to prevent overwhelming the user
-              // - Hand/Mobile Phone: Spike in bottom/edge quadrant (bottomQuadAvg > 12.0 or maxQuadDiff > 2.2 * minQuadDiff with avgPixelDiff > 10.0)
-              // - Face Movement / Head Turn: Upper quadrant shift or general head tilt (topQuadAvg > 6.0, avgPixelDiff between 5.5 and 18.0)
+              // - Hand/Mobile Phone: Spike in bottom/edge quadrant
+              // - Face Movement / Head Turn: Upper quadrant shift or general head tilt
 
-              else if (now - lastMotionWarningTime > 6000) {
-                if (bottomQuadAvg > 14.0 || (maxQuadDiff > 2.2 * (minQuadDiff + 1) && avgPixelDiff > 11.0)) {
+              else if (now - lastMotionWarningTime > 12000) {
+                if (bottomQuadAvg > 35.0 || (maxQuadDiff > 4.0 * (minQuadDiff + 1) && avgPixelDiff > 25.0)) {
                   // Hand or mobile device detected near bottom or camera edge
                   lastMotionWarningTime = now;
                   setTelemetry(prev => ({
@@ -701,7 +702,7 @@ function TestYourKnowledge() {
                     statusMessage: "Secondary device or hand gesture in camera view"
                   }));
                   triggerMalpractice("MOBILE PHONE / HAND OBSTRUCTION DETECTED: Device or hand gesture detected in camera frame. ACTION: Remove secondary mobile devices and keep hands off face.");
-                } else if (topQuadAvg > 5.5 || avgPixelDiff > 5.5) {
+                } else if (topQuadAvg > 25.0 || avgPixelDiff > 30.0) {
                   // Face or head turning away from center
                   lastMotionWarningTime = now;
                   setTelemetry(prev => ({
@@ -1015,37 +1016,56 @@ function TestYourKnowledge() {
         }
       }
 
-      // If no face is detected, terminate session immediately with error screenshot!
+      // If no face is detected, track time and terminate if > 5 seconds
       if (!facePresent && !isTerminated) {
-        const errShot = captureErrorPhoto(failureReason);
-        setCapturedPhoto(errShot);
-        setTerminationScreenshot(errShot);
-        setTerminationReason(failureReason);
-        setIsTerminated(true);
-        setTelemetry((prev) => ({
-          ...prev,
-          faceCount: 0,
-          statusMessage: "Session terminated: No human face detected"
-        }));
-        setMalpracticeAlert(`CRITICAL PROCTOR TERMINATION: ${failureReason}. Session terminated automatically with error screenshot evidence.`);
-        logProctor(`!!! [TERMINATED] ${failureReason}. Error screenshot generated and session terminated. !!!`);
-        stopCamera();
-
-        if (certCode) {
-          fetch("/api/sessions/sync", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              sessionCode: certCode,
-              userName: userName || "Test User",
-              userState: userState || "Delhi NCR",
-              status: "disqualified",
-              proctorLogs: [`[TERMINATED] ${failureReason}. Error screenshot saved.`],
-              flags: 10,
-              userPhoto: errShot
-            })
-          }).catch(() => {});
+        if (!noFaceTimestampRef.current) {
+          noFaceTimestampRef.current = Date.now();
         }
+
+        const noFaceDuration = Date.now() - noFaceTimestampRef.current;
+
+        if (noFaceDuration > 5000) {
+          const errShot = captureErrorPhoto(failureReason);
+          setCapturedPhoto(errShot);
+          setTerminationScreenshot(errShot);
+          setTerminationReason(failureReason);
+          setIsTerminated(true);
+          setMalpracticeCount(10);
+          setTelemetry((prev) => ({
+            ...prev,
+            faceCount: 0,
+            statusMessage: "Session terminated: No human face detected"
+          }));
+          setMalpracticeAlert(`CRITICAL PROCTOR TERMINATION: ${failureReason}. Session terminated automatically with error screenshot evidence.`);
+          logProctor(`!!! [TERMINATED] ${failureReason}. Error screenshot generated and session terminated. !!!`);
+          stopCamera();
+
+          if (certCode) {
+            fetch("/api/sessions/sync", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                sessionCode: certCode,
+                userName: userName || "Test User",
+                userState: userState || "Delhi NCR",
+                status: "disqualified",
+                proctorLogs: [`[TERMINATED] ${failureReason}. Error screenshot saved.`],
+                flags: 10,
+                userPhoto: errShot
+              })
+            }).catch(() => {});
+          }
+        } else {
+          setTelemetry((prev) => ({
+            ...prev,
+            faceCount: 0,
+            statusMessage: "Warning: No human face detected"
+          }));
+          triggerMalpractice(`PROCTOR WARNING: ${failureReason}. Please ensure your face is clearly visible.`);
+          logProctor(`!!! [WARNING] ${failureReason}. !!!`);
+        }
+      } else if (facePresent) {
+        noFaceTimestampRef.current = null;
       }
     };
 

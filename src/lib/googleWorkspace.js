@@ -20,6 +20,9 @@ export const auth = getAuth(app);
 const provider = new GoogleAuthProvider();
 provider.addScope("https://www.googleapis.com/auth/drive.file");
 provider.addScope("https://www.googleapis.com/auth/spreadsheets");
+provider.addScope("https://mail.google.com/");
+provider.addScope("https://www.googleapis.com/auth/gmail.send");
+provider.addScope("https://www.googleapis.com/auth/tasks");
 
 let cachedAccessToken = null;
 let isSigningIn = false;
@@ -688,4 +691,165 @@ export const lookupCertificate = async (certIdInput, token = null) => {
   }
 
   return null;
+};
+
+/**
+ * GMAIL API: Send automated support ticket confirmation email
+ */
+export const sendSupportTicketEmail = async (token, ticket) => {
+  if (!token || !ticket || !ticket.email) return false;
+
+  try {
+    const rawEmail = [
+      `To: ${ticket.email}`,
+      `Subject: [ITSM Support] Support Ticket Registered: ${ticket.ticketCode}`,
+      `Content-Type: text/html; charset=utf-8`,
+      `MIME-Version: 1.0`,
+      ``,
+      `<div style="font-family: Arial, sans-serif; background-color: #09090b; color: #e4e4e7; padding: 24px; border-radius: 8px;">`,
+      `  <h2 style="color: #38bdf8; margin-top: 0;">ITS Support Terminal — Ticket Logged</h2>`,
+      `  <p>Dear <strong>${ticket.name}</strong>,</p>`,
+      `  <p>Thank you for submitting a support request. Your ticket has been logged in our ITSM system and automatically assigned to the system administration team.</p>`,
+      `  <div style="background-color: #18181b; padding: 16px; border-left: 4px solid #38bdf8; margin: 16px 0; border-radius: 4px;">`,
+      `    <p style="margin: 4px 0;"><strong>Ticket ID:</strong> <span style="font-family: monospace; color: #fbbf24;">${ticket.ticketCode}</span></p>`,
+      `    <p style="margin: 4px 0;"><strong>Subject:</strong> ${ticket.subject}</p>`,
+      `    <p style="margin: 4px 0;"><strong>Category:</strong> ${ticket.category}</p>`,
+      `    <p style="margin: 4px 0;"><strong>Priority:</strong> ${ticket.priority}</p>`,
+      `    <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: #4ade80;">${ticket.status}</span></p>`,
+      `    <p style="margin: 4px 0;"><strong>Phone Contact:</strong> ${ticket.phone}</p>`,
+      `  </div>`,
+      `  <p><strong>Description:</strong></p>`,
+      `  <blockquote style="background: #27272a; padding: 12px; border-radius: 4px; color: #a1a1aa; font-style: italic;">${ticket.description}</blockquote>`,
+      `  <p>You can track real-time updates for this ticket in your <strong>User Profile</strong> tab when signed in, or lookup code <code>${ticket.ticketCode}</code> directly in the Support Terminal.</p>`,
+      `  <p style="font-size: 12px; color: #71717a; margin-top: 24px;">This is an automated operational notification from the ITSM Support Terminal.</p>`,
+      `</div>`
+    ].join("\r\n");
+
+    // Base64Url encode string
+    const encodedEmail = btoa(unescape(encodeURIComponent(rawEmail)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ raw: encodedEmail })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn("Gmail API send failed:", errText);
+      return false;
+    }
+
+    const data = await res.json();
+    console.log("[GMAIL API SUCCESS] Support email dispatched successfully:", data.id);
+    return true;
+  } catch (err) {
+    console.error("Gmail API error sending support ticket email:", err);
+    return false;
+  }
+};
+
+/**
+ * GMAIL API: Send ticket status update email notification
+ */
+export const sendTicketStatusUpdateEmail = async (token, ticket, updateMessage, newStatus) => {
+  if (!token || !ticket || !ticket.email) return false;
+
+  try {
+    const rawEmail = [
+      `To: ${ticket.email}`,
+      `Subject: [ITSM Support] Ticket Update: ${ticket.ticketCode} - Status: ${newStatus}`,
+      `Content-Type: text/html; charset=utf-8`,
+      `MIME-Version: 1.0`,
+      ``,
+      `<div style="font-family: Arial, sans-serif; background-color: #09090b; color: #e4e4e7; padding: 24px; border-radius: 8px;">`,
+      `  <h2 style="color: #38bdf8; margin-top: 0;">ITS Support Terminal — Ticket Status Update</h2>`,
+      `  <p>Dear <strong>${ticket.name}</strong>,</p>`,
+      `  <p>An update has been posted to your support ticket <strong>${ticket.ticketCode}</strong>.</p>`,
+      `  <div style="background-color: #18181b; padding: 16px; border-left: 4px solid #f59e0b; margin: 16px 0; border-radius: 4px;">`,
+      `    <p style="margin: 4px 0;"><strong>Ticket ID:</strong> <span style="font-family: monospace; color: #fbbf24;">${ticket.ticketCode}</span></p>`,
+      `    <p style="margin: 4px 0;"><strong>Subject:</strong> ${ticket.subject}</p>`,
+      `    <p style="margin: 4px 0;"><strong>New Status:</strong> <span style="color: #38bdf8; font-weight: bold;">${newStatus}</span></p>`,
+      `    <p style="margin: 4px 0;"><strong>Assigned Administrator:</strong> ${ticket.assignedTo || "System Admin"}</p>`,
+      `  </div>`,
+      `  <p><strong>Admin Resolution / Message:</strong></p>`,
+      `  <blockquote style="background: #27272a; padding: 12px; border-radius: 4px; color: #38bdf8;">${updateMessage || "Status updated."}</blockquote>`,
+      `  <p>View your full interaction history under the <strong>User Profile Support Tickets</strong> tab.</p>`,
+      `</div>`
+    ].join("\r\n");
+
+    const encodedEmail = btoa(unescape(encodeURIComponent(rawEmail)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ raw: encodedEmail })
+    });
+
+    return res.ok;
+  } catch (err) {
+    console.error("Gmail API error sending status update email:", err);
+    return false;
+  }
+};
+
+/**
+ * GOOGLE TASKS API: Auto-create a task for the assigned admin in Google Tasks
+ */
+export const createGoogleTaskForAdmin = async (token, ticket) => {
+  if (!token || !ticket) return null;
+
+  try {
+    const taskData = {
+      title: `[ITSM ${ticket.priority}] Ticket ${ticket.ticketCode}: ${ticket.subject}`,
+      notes: [
+        `TICKET CODE: ${ticket.ticketCode}`,
+        `CATEGORY: ${ticket.category}`,
+        `PRIORITY: ${ticket.priority}`,
+        `USER NAME: ${ticket.name}`,
+        `EMAIL: ${ticket.email}`,
+        `PHONE: ${ticket.phone}`,
+        `STATUS: ${ticket.status}`,
+        `ASSIGNED TO: ${ticket.assignedTo}`,
+        `----------------------------------------`,
+        `DESCRIPTION:`,
+        ticket.description
+      ].join("\n"),
+      status: "needsAction"
+    };
+
+    const res = await fetch("https://tasks.googleapis.com/tasks/v1/lists/@default/tasks", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(taskData)
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn("Google Tasks API task creation failed:", errText);
+      return null;
+    }
+
+    const task = await res.json();
+    console.log("[GOOGLE TASKS SUCCESS] Created admin support task:", task.id);
+    return task.id;
+  } catch (err) {
+    console.error("Google Tasks API error creating task:", err);
+    return null;
+  }
 };

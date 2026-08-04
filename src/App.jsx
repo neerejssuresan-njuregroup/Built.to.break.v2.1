@@ -27,7 +27,14 @@ import {
   Play,
   ArrowLeft,
   ShieldCheck,
-  FileCheck2
+  FileCheck2,
+  LifeBuoy,
+  Menu,
+  Building2,
+  GraduationCap,
+  Lock,
+  Sparkles,
+  Film
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { onAuthStateChanged } from "firebase/auth";
@@ -43,6 +50,7 @@ import DocumentaryInside from "./components/DocumentaryInside";
 import TestYourKnowledge from "./components/TestYourKnowledge";
 import ErrorScreen from "./components/ErrorScreen";
 import AdminDashboard from "./components/AdminDashboard";
+import SupportSection from "./components/SupportSection";
 import { audioEngine } from "./lib/AudioEngine";
 import GamificationHUD from "./components/GamificationHUD";
 import { gamificationStore } from "./lib/GamificationStore";
@@ -77,7 +85,10 @@ export default function App() {
   const [showNbcPortal, setShowNbcPortal] = useState(false);
   const [showVerificationModal, setShowVerificationModal] = useState(false);
   const [showAdminDashboard, setShowAdminDashboard] = useState(false);
+  const [showSupportSection, setShowSupportSection] = useState(false);
+  const [supportDefaultTab, setSupportDefaultTab] = useState("log");
   const [currentUser, setCurrentUser] = useState(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // 404, 403, 503 error states and URL listener
   const [errorState, setErrorState] = useState(null);
@@ -237,9 +248,9 @@ export default function App() {
 
   // Clean up audio on unmount and subscribe to global audioEngine state
   useEffect(() => {
-    setIsAudioPlaying(audioEngine.getIsPlaying());
-    const unsubscribe = audioEngine.subscribe(({ isPlaying }) => {
-      setIsAudioPlaying(isPlaying);
+    setIsAudioPlaying(audioEngine.getIsAudible());
+    const unsubscribe = audioEngine.subscribe(({ isAudible }) => {
+      setIsAudioPlaying(isAudible);
     });
     return () => {
       unsubscribe();
@@ -463,47 +474,79 @@ export default function App() {
       </div>
 
       {/* Floating Header */}
-      <header className="fixed top-0 left-0 right-0 z-50 bg-[#0A0A0A]/90 backdrop-blur-md border-b border-zinc-900 px-4 sm:px-6 py-3.5" id="app-main-header">
-        <div className="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-3">
-          <div className="flex items-center gap-3.5">
-            <div className="flex items-center gap-2.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#EF4444]" />
-              <span className="text-xs font-black tracking-[0.3em] uppercase font-mono text-zinc-100">
+      <header className="fixed top-0 left-0 right-0 z-50 bg-[#0A0A0A]/90 backdrop-blur-md border-b border-zinc-900 px-3 sm:px-6 py-3" id="app-main-header">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
+          
+          {/* Left Logo & HUD */}
+          <div className="flex items-center gap-2.5 sm:gap-3.5">
+            <div 
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              className="flex items-center gap-2 cursor-pointer group"
+            >
+              <span className="w-2.5 h-2.5 rounded-full bg-[#EF4444] animate-pulse" />
+              <span className="text-xs sm:text-sm font-black tracking-[0.2em] sm:tracking-[0.3em] uppercase font-mono text-zinc-100 group-hover:text-red-400 transition-colors">
                 BUILT_TO_BREAK
               </span>
             </div>
 
             <div className="hidden sm:block h-4 w-[1px] bg-zinc-800" />
 
-            {/* Gamified Audit Rank HUD placed right next to BUILT_TO_BREAK */}
-            <GamificationHUD />
+            {/* Gamified Audit Rank HUD placed next to title on larger screens */}
+            <div className="hidden md:block">
+              <GamificationHUD />
+            </div>
           </div>
-          <div className="flex items-center gap-3 md:gap-4 font-mono">
+
+          {/* Right Action Controls */}
+          <div className="flex items-center gap-2 sm:gap-3 font-mono">
+            {/* Direct buttons on large desktop screens */}
+            <button
+              onClick={() => {
+                setSupportDefaultTab("log");
+                setShowSupportSection(true);
+              }}
+              className="hidden xl:flex items-center gap-1.5 text-[10px] font-black tracking-[0.15em] text-sky-400 bg-sky-950/40 hover:bg-sky-900/60 px-3 py-1.5 border border-sky-500/50 shadow-[0_0_12px_rgba(56,189,248,0.2)] transition-all cursor-pointer uppercase"
+              id="header-support-btn"
+            >
+              <LifeBuoy className="w-3.5 h-3.5 text-sky-400 animate-pulse" />
+              <span>SUPPORT & TICKETS</span>
+            </button>
+
             <button
               onClick={() => setShowVerificationModal(true)}
-              className="flex items-center gap-1.5 text-[10px] font-black tracking-[0.15em] text-emerald-400 bg-emerald-950/40 hover:bg-emerald-900/60 px-3.5 py-1.5 border border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.2)] transition-all cursor-pointer uppercase"
+              className="hidden xl:flex items-center gap-1.5 text-[10px] font-black tracking-[0.15em] text-emerald-400 bg-emerald-950/40 hover:bg-emerald-900/60 px-3.5 py-1.5 border border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.2)] transition-all cursor-pointer uppercase"
               id="header-verify-cert-btn"
             >
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden sm:inline">VERIFY CERTIFICATE</span>
-              <span className="inline sm:hidden">VERIFY</span>
+              <span>VERIFY CERTIFICATE</span>
             </button>
 
             {currentUser ? (
-              <div className="flex items-center gap-2.5 bg-zinc-950/80 border border-zinc-900 px-3 py-1.5 shadow-[inset_0_0_8px_rgba(0,0,0,0.6)]">
-                <div className="w-5 h-5 rounded-full bg-red-950 border border-red-500/40 flex items-center justify-center overflow-hidden">
+              <div className="hidden lg:flex items-center gap-2 bg-zinc-950/80 border border-zinc-900 px-2.5 py-1 shadow-[inset_0_0_8px_rgba(0,0,0,0.6)]">
+                <button
+                  onClick={() => {
+                    setSupportDefaultTab("my_tickets");
+                    setShowSupportSection(true);
+                  }}
+                  className="w-5 h-5 rounded-full bg-sky-950 border border-sky-500/40 flex items-center justify-center overflow-hidden hover:scale-105 transition-transform cursor-pointer"
+                  title="View My Support Tickets"
+                >
                   {currentUser.photoURL ? (
                     <img src={currentUser.photoURL} alt={currentUser.displayName || "User"} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                   ) : (
-                    <UserIcon className="w-3 h-3 text-red-500" />
+                    <UserIcon className="w-3 h-3 text-sky-400" />
                   )}
-                </div>
-                <div className="hidden md:block text-left leading-none max-w-[120px]">
+                </button>
+                <div 
+                  onClick={() => {
+                    setSupportDefaultTab("my_tickets");
+                    setShowSupportSection(true);
+                  }}
+                  className="text-left leading-none max-w-[100px] cursor-pointer hover:opacity-80 transition-opacity"
+                  title="View My Support Tickets"
+                >
                   <div className="text-[9px] font-black text-zinc-100 truncate">
                     {(currentUser.displayName || "Examiner").toUpperCase()}
-                  </div>
-                  <div className="text-[8px] text-zinc-500 truncate mt-0.5 font-mono">
-                    {currentUser.email}
                   </div>
                 </div>
                 <button
@@ -511,7 +554,7 @@ export default function App() {
                   className="p-1 text-zinc-500 hover:text-red-500 transition-colors cursor-pointer"
                   title="Sign Out"
                 >
-                  <LogOut className="w-3.5 h-3.5" />
+                  <LogOut className="w-3 h-3" />
                 </button>
               </div>
             ) : (
@@ -523,28 +566,18 @@ export default function App() {
                     console.error("Login failure:", e);
                   }
                 }}
-                className="flex items-center gap-1.5 text-[10px] font-black tracking-[0.12em] text-[#EF4444] bg-red-950/15 hover:bg-red-950/30 px-3 py-1.5 border border-red-800/40 transition-all cursor-pointer uppercase hover:shadow-[0_0_10px_rgba(239,68,68,0.15)]"
+                className="hidden lg:flex items-center gap-1.5 text-[10px] font-black tracking-[0.12em] text-[#EF4444] bg-red-950/15 hover:bg-red-950/30 px-3 py-1.5 border border-red-800/40 transition-all cursor-pointer uppercase hover:shadow-[0_0_10px_rgba(239,68,68,0.15)]"
               >
                 <UserIcon className="w-3 h-3 text-[#EF4444]" />
                 <span>SIGN IN</span>
               </button>
             )}
 
-            <span className="hidden lg:inline-block text-[10px] font-bold tracking-[0.1em] text-[#F97316] bg-[#F97316]/10 px-3 py-1 rounded-full border border-[#F97316]/20">
-              DELHI_RISK_STUDY_v2.1
-            </span>
             <button
               onClick={() => {
-                if (isAudioPlaying) {
-                  audioEngine.stop();
-                  setIsAudioPlaying(false);
-                } else {
-                  audioEngine.start();
-                  audioEngine.setTensionLevel(isCriticalNarrowingActive ? 1.0 : 0.2);
-                  setIsAudioPlaying(true);
-                }
+                audioEngine.toggleAudio();
               }}
-              className={`flex items-center justify-center w-8 h-8 rounded-full border transition-all duration-300 ${
+              className={`flex items-center justify-center w-8 h-8 rounded-full border transition-all duration-300 cursor-pointer ${
                 isAudioPlaying 
                   ? "bg-red-950/40 border-[#EF4444] text-[#EF4444] shadow-[0_0_15px_rgba(239,68,68,0.3)]" 
                   : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700"
@@ -557,6 +590,23 @@ export default function App() {
               ) : (
                 <VolumeX className="w-4 h-4" />
               )}
+            </button>
+
+            {/* TOP-RIGHT CORNER MENU BUTTON (For Mobiles, Tablets, and Quick Access) */}
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-950/50 hover:bg-red-900/70 border border-red-600/60 text-red-300 hover:text-white transition-all cursor-pointer font-mono text-xs font-bold uppercase shadow-[0_0_12px_rgba(239,68,68,0.25)] active:scale-95"
+              id="top-right-mobile-menu-btn"
+              title="Open Controls & Options Menu"
+            >
+              {isMobileMenuOpen ? (
+                <X className="w-4 h-4 text-red-400" />
+              ) : (
+                <Menu className="w-4 h-4 text-red-400" />
+              )}
+              <span className="text-[10px] tracking-wider uppercase font-black">
+                {isMobileMenuOpen ? "CLOSE" : "MENU"}
+              </span>
             </button>
           </div>
         </div>
@@ -1321,6 +1371,17 @@ export default function App() {
         )}
       </AnimatePresence>
 
+      {/* Fullscreen ITSM Support Section & Ticket Tracker */}
+      <AnimatePresence>
+        {showSupportSection && (
+          <SupportSection
+            currentUser={currentUser}
+            defaultTab={supportDefaultTab}
+            onClose={() => setShowSupportSection(false)}
+          />
+        )}
+      </AnimatePresence>
+
       {/* High-performance canvas-based Ember Overlay */}
       <EmberOverlay active={isCriticalNarrowingActive} />
 
@@ -1342,6 +1403,288 @@ export default function App() {
             onClose={() => setShowNbcPortal(false)}
             audioEngine={audioEngine}
           />
+        )}
+      </AnimatePresence>
+
+      {/* Top Right Corner Responsive Menu Drawer for Mobiles & Tablets */}
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <div className="fixed inset-0 z-[100] flex justify-end">
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+
+            {/* Slide-over Menu Content */}
+            <motion.div
+              initial={{ x: "100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 220 }}
+              className="relative w-full max-w-xs sm:max-w-md bg-[#08080a] border-l border-zinc-800 h-full overflow-y-auto p-5 sm:p-6 flex flex-col justify-between shadow-2xl font-mono text-xs text-zinc-100 z-10"
+            >
+              <div className="space-y-6">
+                
+                {/* Header bar of drawer */}
+                <div className="flex items-center justify-between border-b border-zinc-900 pb-4">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+                    <div>
+                      <h2 className="text-xs font-black tracking-widest text-zinc-100 uppercase">
+                        NAVIGATION & CONTROLS
+                      </h2>
+                      <p className="text-[9px] text-zinc-500 uppercase">
+                        Delhi Fire Safety Compliance System
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="p-1.5 bg-zinc-950 border border-zinc-800 hover:border-zinc-600 text-zinc-400 hover:text-white cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* User Authentication Card inside menu */}
+                <div className="p-3.5 bg-zinc-950 border border-zinc-900 space-y-3">
+                  {currentUser ? (
+                    <div className="space-y-2.5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-sky-950 border border-sky-500/50 overflow-hidden flex items-center justify-center shrink-0">
+                          {currentUser.photoURL ? (
+                            <img src={currentUser.photoURL} alt={currentUser.displayName || "User"} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            <UserIcon className="w-4 h-4 text-sky-400" />
+                          )}
+                        </div>
+                        <div className="overflow-hidden">
+                          <div className="text-xs font-bold text-zinc-100 truncate">
+                            {currentUser.displayName || "Logged In Examiner"}
+                          </div>
+                          <div className="text-[10px] text-zinc-500 truncate">
+                            {currentUser.email}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                          onClick={() => {
+                            setSupportDefaultTab("my_tickets");
+                            setShowSupportSection(true);
+                            setIsMobileMenuOpen(false);
+                          }}
+                          className="px-2.5 py-1.5 bg-sky-950/60 hover:bg-sky-900 border border-sky-600/50 text-sky-300 font-bold text-[10px] uppercase text-center cursor-pointer transition-colors"
+                        >
+                          MY TICKETS
+                        </button>
+                        <button
+                          onClick={async () => {
+                            await googleSignOut();
+                            setIsMobileMenuOpen(false);
+                          }}
+                          className="px-2.5 py-1.5 bg-red-950/40 hover:bg-red-900/60 border border-red-800/50 text-red-300 font-bold text-[10px] uppercase text-center cursor-pointer transition-colors"
+                        >
+                          SIGN OUT
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 text-center">
+                      <p className="text-[10px] text-zinc-400 uppercase">
+                        Sign in for personalized ticket tracking & exam records:
+                      </p>
+                      <button
+                        onClick={async () => {
+                          try {
+                            await googleSignIn();
+                            setIsMobileMenuOpen(false);
+                          } catch (e) {
+                            console.error("Login fail:", e);
+                          }
+                        }}
+                        className="w-full py-2 bg-red-950/60 hover:bg-red-900 border border-red-600/60 text-red-300 hover:text-white font-bold text-[10.5px] uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer transition-all shadow-[0_0_10px_rgba(239,68,68,0.2)]"
+                      >
+                        <UserIcon className="w-3.5 h-3.5 text-red-400" />
+                        <span>SIGN IN WITH GOOGLE</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Gamification Rank Card */}
+                <div className="p-3 bg-zinc-950 border border-zinc-900">
+                  <GamificationHUD />
+                </div>
+
+                {/* Primary Action Modules */}
+                <div className="space-y-2">
+                  <span className="text-[9.5px] font-black text-zinc-500 uppercase tracking-widest block">
+                    FEATURED SYSTEM MODULES
+                  </span>
+                  
+                  <div className="grid grid-cols-1 gap-2">
+                    <button
+                      onClick={() => {
+                        setSupportDefaultTab("log");
+                        setShowSupportSection(true);
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className="p-3 bg-sky-950/30 hover:bg-sky-900/50 border border-sky-500/40 text-left flex items-center justify-between cursor-pointer group transition-all"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <LifeBuoy className="w-4 h-4 text-sky-400 animate-pulse shrink-0" />
+                        <div>
+                          <div className="font-bold text-sky-300 text-xs uppercase">SUPPORT & ITSM TICKETS</div>
+                          <div className="text-[9px] text-zinc-400">File incident, request assistance</div>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-sky-500 group-hover:translate-x-1 transition-transform" />
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowVerificationModal(true);
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className="p-3 bg-emerald-950/30 hover:bg-emerald-900/50 border border-emerald-500/40 text-left flex items-center justify-between cursor-pointer group transition-all"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <div>
+                          <div className="font-bold text-emerald-300 text-xs uppercase">VERIFY CERTIFICATE</div>
+                          <div className="text-[9px] text-zinc-400">Validate NBC compliance certificates</div>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-emerald-500 group-hover:translate-x-1 transition-transform" />
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowDocumentary(true);
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className="p-3 bg-amber-950/30 hover:bg-amber-900/50 border border-amber-600/40 text-left flex items-center justify-between cursor-pointer group transition-all"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Film className="w-4 h-4 text-amber-400 shrink-0" />
+                        <div>
+                          <div className="font-bold text-amber-300 text-xs uppercase">3D CASE STUDY DOCUMENTARY</div>
+                          <div className="text-[9px] text-zinc-400">Inside the Arpit Palace Fire</div>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-amber-500 group-hover:translate-x-1 transition-transform" />
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowNbcPortal(true);
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className="p-3 bg-red-950/30 hover:bg-red-900/50 border border-red-600/40 text-left flex items-center justify-between cursor-pointer group transition-all"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Building2 className="w-4 h-4 text-red-400 shrink-0" />
+                        <div>
+                          <div className="font-bold text-red-300 text-xs uppercase">NBC COMPLIANCE AUDIT</div>
+                          <div className="text-[9px] text-zinc-400">Clause loopholes & legal mandates</div>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-red-500 group-hover:translate-x-1 transition-transform" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quick Section Jump Links */}
+                <div className="space-y-2">
+                  <span className="text-[9.5px] font-black text-zinc-500 uppercase tracking-widest block">
+                    QUICK SECTION JUMP
+                  </span>
+                  
+                  <div className="grid grid-cols-1 gap-1.5 text-[11px]">
+                    <button
+                      onClick={() => {
+                        setIsMobileMenuOpen(false);
+                        document.getElementById('section-scrollytelling')?.scrollIntoView({ behavior: 'smooth' });
+                      }}
+                      className="w-full text-left p-2.5 bg-zinc-950 hover:bg-zinc-900 border border-zinc-900 hover:border-zinc-700 text-zinc-300 hover:text-white flex items-center justify-between cursor-pointer transition-colors"
+                    >
+                      <span>📊 Delhi Risk Map & Analytics</span>
+                      <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setIsMobileMenuOpen(false);
+                        document.getElementById('section-simulator')?.scrollIntoView({ behavior: 'smooth' });
+                      }}
+                      className="w-full text-left p-2.5 bg-zinc-950 hover:bg-zinc-900 border border-zinc-900 hover:border-zinc-700 text-zinc-300 hover:text-white flex items-center justify-between cursor-pointer transition-colors"
+                    >
+                      <span>⚠️ Arson & Thermal Spread Simulator</span>
+                      <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setIsMobileMenuOpen(false);
+                        document.getElementById('section-comparisons')?.scrollIntoView({ behavior: 'smooth' });
+                      }}
+                      className="w-full text-left p-2.5 bg-zinc-950 hover:bg-zinc-900 border border-zinc-900 hover:border-zinc-700 text-zinc-300 hover:text-white flex items-center justify-between cursor-pointer transition-colors"
+                    >
+                      <span>📜 Municipal Comparison Engine</span>
+                      <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setIsMobileMenuOpen(false);
+                        document.getElementById('section-compliance-exam')?.scrollIntoView({ behavior: 'smooth' });
+                      }}
+                      className="w-full text-left p-2.5 bg-zinc-950 hover:bg-zinc-900 border border-zinc-900 hover:border-zinc-700 text-zinc-300 hover:text-white flex items-center justify-between cursor-pointer transition-colors"
+                    >
+                      <span>🎓 NBC COMPLIANCE EXAM</span>
+                      <ChevronRight className="w-3.5 h-3.5 text-zinc-500" />
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setShowAdminDashboard(true);
+                        setIsMobileMenuOpen(false);
+                      }}
+                      className="w-full text-left p-2.5 bg-zinc-950 hover:bg-zinc-900 border border-zinc-900 hover:border-amber-600/50 text-amber-400 hover:text-amber-300 flex items-center justify-between cursor-pointer transition-colors"
+                    >
+                      <span className="flex items-center gap-1.5">
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>Admin Terminal & System Settings</span>
+                      </span>
+                      <ChevronRight className="w-3.5 h-3.5 text-amber-500" />
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Drawer Footer */}
+              <div className="pt-6 border-t border-zinc-900 space-y-2 text-[10px] text-zinc-500">
+                <div className="flex justify-between items-center font-bold">
+                  <span className="text-zinc-400">DELHI_RISK_STUDY_v2.1</span>
+                  <span className="text-emerald-400 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                    SYSTEM ONLINE
+                  </span>
+                </div>
+                <div className="text-[9px] text-zinc-600">
+                  Municipal Fire Safety Audit Framework • All rights reserved
+                </div>
+              </div>
+
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 

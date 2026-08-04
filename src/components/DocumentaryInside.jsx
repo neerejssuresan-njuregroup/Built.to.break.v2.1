@@ -260,16 +260,13 @@ const EVIDENCE_DATABASE = {
 function DocumentaryInside({ onClose, audioEngine }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
-  const [isAudioMuted, setIsAudioMuted] = useState(audioEngine ? audioEngine.getIsMuted() : false);
-  const [isAudioPlaying, setIsAudioPlaying] = useState(audioEngine ? audioEngine.getIsPlaying() : false);
+  const [isAudioAudible, setIsAudioAudible] = useState(audioEngine ? audioEngine.getIsAudible() : false);
 
   useEffect(() => {
     if (audioEngine) {
-      setIsAudioMuted(audioEngine.getIsMuted());
-      setIsAudioPlaying(audioEngine.getIsPlaying());
-      const unsubscribe = audioEngine.subscribe(({ isPlaying, isMuted }) => {
-        setIsAudioPlaying(isPlaying);
-        setIsAudioMuted(isMuted);
+      setIsAudioAudible(audioEngine.getIsAudible());
+      const unsubscribe = audioEngine.subscribe(({ isAudible }) => {
+        setIsAudioAudible(isAudible);
       });
       return unsubscribe;
     }
@@ -277,7 +274,7 @@ function DocumentaryInside({ onClose, audioEngine }) {
 
   const toggleMute = () => {
     if (audioEngine) {
-      audioEngine.toggleMute();
+      audioEngine.toggleAudio();
     }
   };
 
@@ -1069,11 +1066,10 @@ function DocumentaryInside({ onClose, audioEngine }) {
           {audioEngine && (
             <button
               onClick={toggleMute}
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-[#EF4444]/30 bg-red-950/10 text-[10px] font-mono font-bold uppercase hover:bg-zinc-900 hover:border-zinc-500 hover:text-white transition-all duration-300 rounded-none cursor-pointer"
-              title={isAudioMuted ? "Unmute Ambient Audio" : "Mute Ambient Audio"}
+              className="p-2 border border-[#EF4444]/30 bg-red-950/10 hover:bg-zinc-900 hover:border-zinc-500 transition-all duration-300 rounded-none cursor-pointer flex items-center justify-center"
+              title={isAudioAudible ? "Mute Ambient Audio" : "Play Ambient Audio"}
             >
-              {isAudioMuted ? <VolumeX className="w-3.5 h-3.5 text-red-500 animate-pulse" /> : <Volume2 className="w-3.5 h-3.5 text-emerald-500" />}
-              <span>{isAudioMuted ? "MUTED" : "SOUND_ON"}</span>
+              {isAudioAudible ? <Volume2 className="w-4 h-4 text-emerald-500" /> : <VolumeX className="w-4 h-4 text-red-500 animate-pulse" />}
             </button>
           )}
           <div className="flex items-center gap-3 font-mono text-[10px] tracking-widest text-zinc-400">
