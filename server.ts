@@ -10,6 +10,7 @@ import { eq, sql, desc } from "drizzle-orm";
 import { adminAuth } from "./src/lib/firebase-admin.ts";
 import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
 import { FALLBACK_QUESTIONS } from "./src/questionsData.js";
+import { sendTicketConfirmationEmailServer, sendTicketStatusUpdateEmailServer } from "./src/server/mailService.ts";
 
 // Initialize Gemini Client
 const ai = new GoogleGenAI({
@@ -952,6 +953,12 @@ Return a JSON object adhering to this schema:
       });
 
       console.log(`[ITSM] Support ticket logged successfully: ${ticketCode}`);
+      
+      // Dispatch automated confirmation email
+      sendTicketConfirmationEmailServer(newTicket).catch(err => {
+        console.error("[ITSM] Automated email dispatch background error:", err);
+      });
+
       res.json({ success: true, ticket: newTicket });
     } catch (error: any) {
       console.error("[ITSM] Create ticket error:", error);
@@ -1069,6 +1076,17 @@ Return a JSON object adhering to this schema:
 
       const updatedTicket = await db.select().from(supportTickets).where(eq(supportTickets.id, ticketId)).limit(1);
       const updates = await db.select().from(ticketUpdates).where(eq(ticketUpdates.ticketId, ticketId)).orderBy(desc(ticketUpdates.createdAt));
+
+      // Dispatch automated status update email to user
+      if (updatedTicket.length > 0) {
+        sendTicketStatusUpdateEmailServer(
+          updatedTicket[0], 
+          message || `Status updated to ${newStatus}`, 
+          newStatus
+        ).catch(err => {
+          console.error("[ITSM] Automated status update email background error:", err);
+        });
+      }
 
       res.json({ success: true, ticket: updatedTicket[0], updates });
     } catch (error: any) {

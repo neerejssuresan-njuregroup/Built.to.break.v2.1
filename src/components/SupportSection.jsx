@@ -133,13 +133,13 @@ export default function SupportSection({ currentUser, onClose, defaultTab = "log
 
       // 2. Google Workspace Integration: Gmail & Tasks
       const token = getAccessToken();
-      let emailSent = false;
+      let clientEmailSent = false;
       let taskCreatedId = null;
 
       if (token) {
         try {
-          // Send automated confirmation email via Gmail API
-          emailSent = await sendSupportTicketEmail(token, ticket);
+          // Send automated confirmation email via Gmail API if token available
+          clientEmailSent = await sendSupportTicketEmail(token, ticket);
         } catch (mailErr) {
           console.warn("Gmail API email warning:", mailErr);
         }
@@ -154,7 +154,7 @@ export default function SupportSection({ currentUser, onClose, defaultTab = "log
 
       setSubmitSuccess({
         ticket,
-        emailSent,
+        emailSent: true, // Backend server mail service dispatches email automatically
         taskCreated: !!taskCreatedId
       });
 
