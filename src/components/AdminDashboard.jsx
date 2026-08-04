@@ -309,18 +309,33 @@ export default function AdminDashboard({ onClose }) {
         const data = await res.json();
         const updatedTicket = data.ticket;
 
-        // Send automated notification via Gmail API if OAuth token is available
+        // Send automated notification via Gmail API if token is already available (without forcing sign-in popups)
         const googleToken = getAccessToken();
-        if (googleToken && updatedTicket && ticketResponseMsg.trim()) {
-          try {
-            await sendTicketStatusUpdateEmail(
-              googleToken,
-              updatedTicket,
-              ticketResponseMsg.trim(),
-              ticketNewStatus || selectedTicket.status
-            );
-          } catch (mErr) {
-            console.warn("Gmail notification failed:", mErr);
+        if (googleToken) {
+          // Register token with backend so server can send auto-emails if needed
+          fetch("/api/support/admin/register-mail-token", {
+            method: "POST",
+            headers: { 
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${token}`
+            },
+            body: JSON.stringify({ accessToken: googleToken })
+          }).catch(e => console.warn("Register mail token failed:", e));
+
+          if (updatedTicket) {
+            try {
+              const mailSent = await sendTicketStatusUpdateEmail(
+                googleToken,
+                updatedTicket,
+                ticketResponseMsg.trim() || `Official Status Updated to: ${ticketNewStatus || selectedTicket.status}`,
+                ticketNewStatus || selectedTicket.status
+              );
+              if (mailSent) {
+                console.log(`[GMAIL DISPATCH SUCCESS] Status update email sent to user ${updatedTicket.email}`);
+              }
+            } catch (mErr) {
+              console.warn("Gmail notification dispatch failed:", mErr);
+            }
           }
         }
 

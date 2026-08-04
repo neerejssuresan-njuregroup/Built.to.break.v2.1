@@ -22,7 +22,8 @@ import {
   Sparkles
 } from "lucide-react";
 import { 
-  getAccessToken, 
+  getAccessToken,
+  googleSignIn,
   sendSupportTicketEmail, 
   createGoogleTaskForAdmin 
 } from "../lib/googleWorkspace";
@@ -131,21 +132,20 @@ export default function SupportSection({ currentUser, onClose, defaultTab = "log
 
       const ticket = data.ticket;
 
-      // 2. Google Workspace Integration: Gmail & Tasks
+      // Google Workspace Integration (optional client-side sync if user is already signed in)
       const token = getAccessToken();
-      let clientEmailSent = false;
       let taskCreatedId = null;
 
       if (token) {
         try {
-          // Send automated confirmation email via Gmail API if token available
-          clientEmailSent = await sendSupportTicketEmail(token, ticket);
+          // Send automated confirmation email via active Gmail OAuth session if available
+          await sendSupportTicketEmail(token, ticket);
         } catch (mailErr) {
-          console.warn("Gmail API email warning:", mailErr);
+          console.warn("Client Gmail API email dispatch warning:", mailErr);
         }
 
         try {
-          // Auto-create task for Admin via Google Tasks API
+          // Auto-create task for Admin via Google Tasks API if token available
           taskCreatedId = await createGoogleTaskForAdmin(token, ticket);
         } catch (taskErr) {
           console.warn("Google Tasks API task creation warning:", taskErr);

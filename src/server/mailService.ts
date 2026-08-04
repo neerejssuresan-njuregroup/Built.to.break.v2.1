@@ -16,14 +16,71 @@ interface TicketData {
 }
 
 let transporter: nodemailer.Transporter | null = null;
+let serverMailOAuthToken: string | null = null;
+
+export function setServerMailOAuthToken(token: string | null): void {
+  serverMailOAuthToken = token;
+  if (token) {
+    console.log("[MAIL SERVICE] System Admin Gmail OAuth token registered for backend email automation.");
+  }
+}
+
+export function getServerMailOAuthToken(): string | null {
+  return serverMailOAuthToken;
+}
+
+async function sendViaGmailApiServer(
+  toEmail: string,
+  subject: string,
+  htmlContent: string,
+  oauthToken: string
+): Promise<boolean> {
+  try {
+    const rawEmail = [
+      `To: ${toEmail}`,
+      `Subject: ${subject}`,
+      `Content-Type: text/html; charset=utf-8`,
+      `MIME-Version: 1.0`,
+      ``,
+      htmlContent
+    ].join("\r\n");
+
+    const encodedEmail = Buffer.from(rawEmail).toString("base64")
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    const res = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${oauthToken}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ raw: encodedEmail })
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn("[MAIL SERVICE - GMAIL API] Dispatch warning:", errText);
+      return false;
+    }
+
+    const data = await res.json();
+    console.log("[MAIL SERVICE - GMAIL API SUCCESS] Email sent to", toEmail, "| ID:", data.id);
+    return true;
+  } catch (err) {
+    console.error("[MAIL SERVICE - GMAIL API ERROR]", err);
+    return false;
+  }
+}
 
 export function getMailTransporter(): nodemailer.Transporter {
   if (transporter) return transporter;
 
-  const host = process.env.SMTP_HOST;
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
-  const port = parseInt(process.env.SMTP_PORT || "587", 10);
+  const user = process.env.SMTP_USER || process.env.GMAIL_USER;
+  const pass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD;
+  const host = process.env.SMTP_HOST || (user && user.includes("@gmail.com") ? "smtp.gmail.com" : undefined);
+  const port = parseInt(process.env.SMTP_PORT || "465", 10);
 
   if (host && user && pass) {
     transporter = nodemailer.createTransport({
@@ -32,13 +89,13 @@ export function getMailTransporter(): nodemailer.Transporter {
       secure: port === 465,
       auth: { user, pass }
     });
-    console.log(`[MAIL SERVICE] SMTP Transporter configured (${host}:${port})`);
+    console.log(`[MAIL SERVICE] Real SMTP Transporter active (${user} via ${host}:${port})`);
   } else {
     // Fallback JSON transport for development/preview environments
     transporter = nodemailer.createTransport({
       jsonTransport: true
     });
-    console.log("[MAIL SERVICE] Fallback Transporter initialized. Logs & JSON transport ready.");
+    console.log("[MAIL SERVICE NOTICE] Direct SMTP credentials not set in server env. Emails will be dispatched via active Gmail API OAuth session or stored in server logs.");
   }
 
   return transporter;
@@ -49,61 +106,45 @@ export function getMailTransporter(): nodemailer.Transporter {
  */
 export async function sendTicketConfirmationEmailServer(ticket: TicketData): Promise<boolean> {
   try {
-    const transport = getMailTransporter();
-    const fromAddress = process.env.SMTP_FROM || `"Built to Break ITSM Support" <support@builttobreak.delhi.gov.in>`;
+    const ticketCode = ticket.ticketCode || "TKT-XXXXX";
+    const customerName = ticket.name || "Customer";
 
     const htmlContent = `
-      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #09090b; color: #e4e4e7; padding: 32px; border-radius: 8px; max-width: 600px; margin: 0 auto; border: 1px solid #27272a;">
-        <div style="border-bottom: 2px solid #ef4444; padding-bottom: 12px; margin-bottom: 20px;">
-          <h2 style="color: #ef4444; margin: 0; font-size: 20px; text-transform: uppercase; letter-spacing: 1px;">
-            🚨 Built to Break — ITSM Support Ticket Registered
-          </h2>
-          <p style="color: #71717a; font-size: 11px; font-family: monospace; margin-top: 4px;">
-            MUNICIPAL FIRE SAFETY COMPLIANCE SYSTEM • AUTOMATED DISPATCH
-          </p>
-        </div>
-
-        <p>Dear <strong>${ticket.name}</strong>,</p>
-        <p>Your support ticket has been logged into our ITSM Incident & Regulatory Assistance System. Our compliance technical team will inspect your inquiry.</p>
-
-        <div style="background-color: #18181b; padding: 20px; border-left: 4px solid #38bdf8; margin: 20px 0; border-radius: 6px;">
-          <p style="margin: 6px 0; font-size: 14px;"><strong>Ticket Code:</strong> <span style="font-family: monospace; color: #fbbf24; font-weight: bold; font-size: 16px;">${ticket.ticketCode}</span></p>
-          <p style="margin: 6px 0; font-size: 13px;"><strong>Subject:</strong> ${ticket.subject}</p>
-          <p style="margin: 6px 0; font-size: 13px;"><strong>Category:</strong> ${ticket.category}</p>
-          <p style="margin: 6px 0; font-size: 13px;"><strong>Priority Level:</strong> <span style="color: #ef4444; font-weight: bold;">${ticket.priority}</span></p>
-          <p style="margin: 6px 0; font-size: 13px;"><strong>Initial Status:</strong> <span style="color: #4ade80; font-weight: bold;">${ticket.status}</span></p>
-          <p style="margin: 6px 0; font-size: 13px;"><strong>Registered Phone:</strong> ${ticket.phone}</p>
-        </div>
-
-        <div style="margin: 20px 0;">
-          <p style="margin-bottom: 8px; font-size: 13px; font-weight: bold; color: #a1a1aa;">INQUIRY DESCRIPTION:</p>
-          <div style="background: #27272a; padding: 14px; border-radius: 6px; color: #d4d4d8; font-size: 13px; line-height: 1.5; border: 1px solid #3f3f46;">
-            ${ticket.description}
-          </div>
-        </div>
-
-        <div style="background-color: #172554; border: 1px solid #1e40af; padding: 14px; border-radius: 6px; margin-top: 24px;">
-          <p style="margin: 0; font-size: 12px; color: #93c5fd;">
-            🔍 <strong>Live Tracking:</strong> You can track this ticket anytime using code <strong>${ticket.ticketCode}</strong> in the Support Portal or under <strong>My Support Tickets</strong> in your profile.
-          </p>
-        </div>
-
-        <hr style="border: 0; border-top: 1px solid #27272a; margin: 28px 0 16px 0;" />
-        <p style="font-size: 11px; color: #71717a; text-align: center; margin: 0;">
-          Delhi Municipal Fire Compliance System • Automated Notification System
-        </p>
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; padding: 24px; border-radius: 8px;">
+        <p>Dear ${customerName},</p>
+        <p>Thank you for reaching out to us.</p>
+        <p>We have successfully received your support ticket (<strong>${ticketCode}</strong>) and our team is currently working on it.</p>
+        <p>We appreciate your patience while we review the details. We will update you as soon as there is progress or if we require any additional information from you.</p>
+        <p>If you need to add any details to this request, simply reply directly to this email.</p>
+        <br />
+        <p>Best regards,<br /><strong>Built to Break Support Team</strong></p>
+        <hr style="border: 0; border-top: 1px solid #e2e8f0; margin-top: 24px;" />
+        <p style="font-size: 11px; color: #71717a;">Ticket Reference: ${ticketCode} | Subject: ${ticket.subject || "Support Request"}</p>
       </div>
     `;
+
+    const subject = `Support Ticket Received [${ticketCode}]`;
+
+    // 1. Try Gmail API if Admin/System OAuth token is registered on server
+    if (serverMailOAuthToken) {
+      const gSuccess = await sendViaGmailApiServer(ticket.email, subject, htmlContent, serverMailOAuthToken);
+      if (gSuccess) return true;
+    }
+
+    // 2. Fallback to Nodemailer SMTP
+    const transport = getMailTransporter();
+    const fromAddress = process.env.SMTP_FROM || `"Built to Break Support Team" <support@builttobreak.delhi.gov.in>`;
+    const textContent = `Dear ${customerName},\n\nThank you for reaching out to us.\nWe have successfully received your support ticket (${ticketCode}) and our team is currently working on it.\nWe appreciate your patience while we review the details. We will update you as soon as there is progress or if we require any additional information from you.\nIf you need to add any details to this request, simply reply directly to this email.\n\nBest regards,\nBuilt to Break Support Team`;
 
     const info = await transport.sendMail({
       from: fromAddress,
       to: ticket.email,
-      subject: `[ITSM Support] Ticket Logged: ${ticket.ticketCode} - ${ticket.subject}`,
+      subject,
       html: htmlContent,
-      text: `Support Ticket Logged\nTicket Code: ${ticket.ticketCode}\nSubject: ${ticket.subject}\nStatus: ${ticket.status}\nDescription: ${ticket.description}`
+      text: textContent
     });
 
-    console.log(`[AUTOMATED MAIL SUCCESS] Confirmation email dispatched for ticket ${ticket.ticketCode} to ${ticket.email}. MessageID:`, info.messageId || "Dispatched");
+    console.log(`[AUTOMATED MAIL SUCCESS] Confirmation email dispatched for ticket ${ticketCode} to ${ticket.email}. MessageID:`, info.messageId || "Dispatched");
     return true;
   } catch (error) {
     console.error("[AUTOMATED MAIL ERROR] Failed to send ticket confirmation email:", error);
@@ -112,7 +153,7 @@ export async function sendTicketConfirmationEmailServer(ticket: TicketData): Pro
 }
 
 /**
- * Send Automated Email when an admin updates a ticket status or posts a message
+ * Send Automated Email when an admin updates a ticket status or posts a message/comment
  */
 export async function sendTicketStatusUpdateEmailServer(
   ticket: TicketData,
@@ -120,53 +161,49 @@ export async function sendTicketStatusUpdateEmailServer(
   newStatus: string
 ): Promise<boolean> {
   try {
-    const transport = getMailTransporter();
-    const fromAddress = process.env.SMTP_FROM || `"Built to Break ITSM Support" <support@builttobreak.delhi.gov.in>`;
+    const ticketCode = ticket.ticketCode || "TKT-XXXXX";
+    const customerName = ticket.name || "Customer";
 
     const htmlContent = `
-      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #09090b; color: #e4e4e7; padding: 32px; border-radius: 8px; max-width: 600px; margin: 0 auto; border: 1px solid #27272a;">
-        <div style="border-bottom: 2px solid #38bdf8; padding-bottom: 12px; margin-bottom: 20px;">
-          <h2 style="color: #38bdf8; margin: 0; font-size: 20px; text-transform: uppercase; letter-spacing: 1px;">
-            🔔 Support Ticket Status Update
-          </h2>
-          <p style="color: #71717a; font-size: 11px; font-family: monospace; margin-top: 4px;">
-            ITSM INCIDENT RESOLUTION TERMINAL
-          </p>
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; padding: 24px; border-radius: 8px;">
+        <p>Dear ${customerName},</p>
+        <p>Thank you for reaching out to us.</p>
+        <p>We have an update regarding your support ticket (<strong>${ticketCode}</strong>):</p>
+        <div style="background-color: #f8fafc; border-left: 4px solid #0284c7; padding: 12px 16px; margin: 16px 0; border-radius: 4px;">
+          <p style="margin: 0 0 8px 0;"><strong>Status:</strong> ${newStatus || ticket.status}</p>
+          <p style="margin: 0;"><strong>Comment / Update:</strong> ${message || "Your request is being processed."}</p>
         </div>
-
-        <p>Dear <strong>${ticket.name}</strong>,</p>
-        <p>An official update has been recorded for your support ticket <strong style="color: #fbbf24;">${ticket.ticketCode}</strong>.</p>
-
-        <div style="background-color: #18181b; padding: 20px; border-left: 4px solid #f59e0b; margin: 20px 0; border-radius: 6px;">
-          <p style="margin: 6px 0; font-size: 14px;"><strong>Ticket Code:</strong> <span style="font-family: monospace; color: #fbbf24; font-weight: bold;">${ticket.ticketCode}</span></p>
-          <p style="margin: 6px 0; font-size: 13px;"><strong>Subject:</strong> ${ticket.subject}</p>
-          <p style="margin: 6px 0; font-size: 14px;"><strong>New Ticket Status:</strong> <span style="color: #38bdf8; font-weight: bold; background: #0c4a6e; padding: 2px 8px; border-radius: 4px;">${newStatus}</span></p>
-          <p style="margin: 6px 0; font-size: 13px;"><strong>Assigned Admin:</strong> ${ticket.assignedTo || "System Administrator"}</p>
-        </div>
-
-        <div style="margin: 20px 0;">
-          <p style="margin-bottom: 8px; font-size: 13px; font-weight: bold; color: #a1a1aa;">OFFICIAL ADMIN RESPONSE / RESOLUTION:</p>
-          <div style="background: #172554; padding: 14px; border-radius: 6px; color: #bfdbfe; font-size: 13px; line-height: 1.5; border: 1px solid #1d4ed8;">
-            ${message || "Your ticket status has been updated."}
-          </div>
-        </div>
-
-        <hr style="border: 0; border-top: 1px solid #27272a; margin: 28px 0 16px 0;" />
-        <p style="font-size: 11px; color: #71717a; text-align: center; margin: 0;">
-          Delhi Municipal Fire Safety Compliance System • Support Resolution Desk
-        </p>
+        <p>We appreciate your patience while we review the details. We will update you as soon as there is progress or if we require any additional information from you.</p>
+        <p>If you need to add any details to this request, simply reply directly to this email.</p>
+        <br />
+        <p>Best regards,<br /><strong>Built to Break Support Team</strong></p>
+        <hr style="border: 0; border-top: 1px solid #e2e8f0; margin-top: 24px;" />
+        <p style="font-size: 11px; color: #71717a;">Ticket Reference: ${ticketCode}</p>
       </div>
     `;
+
+    const subject = `Support Ticket Update [${ticketCode}]`;
+
+    // 1. Try Gmail API if Admin/System OAuth token is registered on server
+    if (serverMailOAuthToken) {
+      const gSuccess = await sendViaGmailApiServer(ticket.email, subject, htmlContent, serverMailOAuthToken);
+      if (gSuccess) return true;
+    }
+
+    // 2. Fallback to Nodemailer SMTP
+    const transport = getMailTransporter();
+    const fromAddress = process.env.SMTP_FROM || `"Built to Break Support Team" <support@builttobreak.delhi.gov.in>`;
+    const textContent = `Dear ${customerName},\n\nThank you for reaching out to us.\nWe have an update regarding your support ticket (${ticketCode}):\nStatus: ${newStatus}\nComment/Update: ${message}\n\nWe appreciate your patience while we review the details. We will update you as soon as there is progress or if we require any additional information from you.\nIf you need to add any details to this request, simply reply directly to this email.\n\nBest regards,\nBuilt to Break Support Team`;
 
     const info = await transport.sendMail({
       from: fromAddress,
       to: ticket.email,
-      subject: `[ITSM Support] Status Update for Ticket ${ticket.ticketCode} (${newStatus})`,
+      subject,
       html: htmlContent,
-      text: `Support Ticket Update\nTicket Code: ${ticket.ticketCode}\nNew Status: ${newStatus}\nMessage: ${message}`
+      text: textContent
     });
 
-    console.log(`[AUTOMATED MAIL SUCCESS] Status update email dispatched for ticket ${ticket.ticketCode} to ${ticket.email}. MessageID:`, info.messageId || "Dispatched");
+    console.log(`[AUTOMATED MAIL SUCCESS] Status update email dispatched for ticket ${ticketCode} to ${ticket.email}. MessageID:`, info.messageId || "Dispatched");
     return true;
   } catch (error) {
     console.error("[AUTOMATED MAIL ERROR] Failed to send ticket update email:", error);

@@ -1,6 +1,8 @@
 import express from "express";
 import path from "path";
 import crypto from "crypto";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import { Server as SocketIOServer } from "socket.io";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -10,7 +12,8 @@ import { eq, sql, desc } from "drizzle-orm";
 import { adminAuth } from "./src/lib/firebase-admin.ts";
 import { requireAuth, AuthRequest } from "./src/middleware/auth.ts";
 import { FALLBACK_QUESTIONS } from "./src/questionsData.js";
-import { sendTicketConfirmationEmailServer, sendTicketStatusUpdateEmailServer } from "./src/server/mailService.ts";
+import { sendTicketConfirmationEmailServer, sendTicketStatusUpdateEmailServer, setServerMailOAuthToken } from "./src/server/mailService.ts";
+import { xssSanitizerMiddleware, maskSensitiveId, sanitizeString } from "./src/utils/security.ts";
 
 // Initialize Gemini Client
 const ai = new GoogleGenAI({
@@ -59,7 +62,34 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
   
+  // Security Headers via Helmet
+  app.use(helmet({
+    contentSecurityPolicy: false, // Disabled to allow embedded iframe & inline styles/preview assets
+    crossOriginEmbedderPolicy: false
+  }));
+
+  // Rate Limiting
+  const generalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 300, // limit each IP to 300 requests per windowMs
+    message: { error: "Too many requests, please try again later." }
+  });
+
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20, // max 20 attempts per 15 minutes
+    message: { error: "Too many login attempts, please try again later." }
+  });
+
+  app.use("/api/", generalLimiter);
+  app.use("/api/admin/login", authLimiter);
+
+  // Body parsers with size limit
   app.use(express.json({ limit: "50mb" }));
+  app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
+  // Global XSS Sanitizer for input fields
+  app.use(xssSanitizerMiddleware);
 
   app.get("/api/settings", (req, res) => {
     res.json(globalSettings);
@@ -120,10 +150,6 @@ async function startServer() {
   } catch (err: any) {
     console.warn("[DB] Question auto-seed note:", err?.message);
   }
-
-  // Body parsers with increased limit for base64 photo uploads
-  app.use(express.json({ limit: "20mb" }));
-  app.use(express.urlencoded({ limit: "20mb", extended: true }));
 
   // API Route: Healthcheck
   app.get("/api/health", (req, res) => {
@@ -835,6 +861,14 @@ Return a JSON object adhering to this schema:
       .where(eq(certificates.certCode, cleanCode))
       .limit(1);
 
+      const sanitizeCert = (cert: any) => {
+        if (!cert) return null;
+        return {
+          ...cert,
+          idNumber: maskSensitiveId(cert.idNumber, cert.idType)
+        };
+      };
+
       if (records.length === 0) {
         // Also check if they passed with/without standard suffix
         const altCode = cleanCode.endsWith("-SHOW") ? cleanCode.replace("-SHOW", "") : `${cleanCode}-SHOW`;
@@ -866,13 +900,13 @@ Return a JSON object adhering to this schema:
         .limit(1);
 
         if (altRecords.length > 0) {
-          return res.json({ found: true, certificate: altRecords[0] });
+          return res.json({ found: true, certificate: sanitizeCert(altRecords[0]) });
         }
 
         return res.status(404).json({ found: false, error: "Certificate code not found in registry" });
       }
 
-      res.json({ found: true, certificate: records[0] });
+      res.json({ found: true, certificate: sanitizeCert(records[0]) });
     } catch (error: any) {
       console.error("Database verify certificate error:", error);
       res.status(500).json({ error: "Verification server error", details: error.message });
@@ -1108,6 +1142,21 @@ Return a JSON object adhering to this schema:
     }
   });
 
+  // Register Admin/System Gmail OAuth token for automated backend email dispatch (Admin Only)
+  app.post("/api/support/admin/register-mail-token", requireAdmin, async (req, res) => {
+    try {
+      const { accessToken } = req.body;
+      if (accessToken && typeof accessToken === "string") {
+        setServerMailOAuthToken(accessToken);
+        return res.json({ success: true, message: "Server Mail OAuth Token registered successfully" });
+      }
+      return res.status(400).json({ error: "Invalid accessToken provided" });
+    } catch (error: any) {
+      console.error("[ITSM] Register mail token error:", error);
+      res.status(500).json({ error: "Failed to register mail token" });
+    }
+  });
+
   // Vite middleware integration
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
@@ -1133,12 +1182,17 @@ Return a JSON object adhering to this schema:
 
   io.on("connection", (socket) => {
     socket.on("join-session", (sessionCode) => {
-      socket.join(sessionCode);
+      if (typeof sessionCode === "string" && sessionCode.trim().length > 0) {
+        socket.join(sessionCode.trim());
+      }
     });
 
     socket.on("video-frame", (data) => {
-      if (data && data.sessionCode) {
-        socket.to(data.sessionCode).emit("receive-video-frame", data);
+      if (data && typeof data.sessionCode === "string" && data.frame) {
+        socket.to(data.sessionCode.trim()).emit("receive-video-frame", {
+          sessionCode: data.sessionCode.trim(),
+          frame: data.frame
+        });
       }
     });
   });

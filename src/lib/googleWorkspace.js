@@ -24,8 +24,31 @@ provider.addScope("https://mail.google.com/");
 provider.addScope("https://www.googleapis.com/auth/gmail.send");
 provider.addScope("https://www.googleapis.com/auth/tasks");
 
-let cachedAccessToken = null;
+let cachedAccessToken = typeof window !== "undefined" ? sessionStorage.getItem("btb_google_access_token") : null;
 let isSigningIn = false;
+
+export const setAccessToken = (token) => {
+  cachedAccessToken = token;
+  if (typeof window !== "undefined") {
+    if (token) {
+      sessionStorage.setItem("btb_google_access_token", token);
+    } else {
+      sessionStorage.removeItem("btb_google_access_token");
+    }
+  }
+};
+
+export const getAccessToken = () => {
+  if (cachedAccessToken) return cachedAccessToken;
+  if (typeof window !== "undefined") {
+    const saved = sessionStorage.getItem("btb_google_access_token");
+    if (saved) {
+      cachedAccessToken = saved;
+      return saved;
+    }
+  }
+  return null;
+};
 
 // Initial pre-populated local verified certificates registry for public verification
 const DEMO_CERTIFICATES = [
@@ -137,8 +160,8 @@ export const googleSignIn = async () => {
     if (!credential?.accessToken) {
       throw new Error("Could not retrieve Google OAuth Access Token.");
     }
-    cachedAccessToken = credential.accessToken;
-    return { user: result.user, accessToken: cachedAccessToken };
+    setAccessToken(credential.accessToken);
+    return { user: result.user, accessToken: credential.accessToken };
   } catch (error) {
     console.error("Google sign in error:", error);
     throw error;
@@ -149,10 +172,8 @@ export const googleSignIn = async () => {
 
 export const googleSignOut = async () => {
   await signOut(auth);
-  cachedAccessToken = null;
+  setAccessToken(null);
 };
-
-export const getAccessToken = () => cachedAccessToken;
 
 /**
  * GOOGLE SHEETS API: Find or create the master certificate spreadsheet
@@ -700,29 +721,30 @@ export const sendSupportTicketEmail = async (token, ticket) => {
   if (!token || !ticket || !ticket.email) return false;
 
   try {
+    const ticketCode = ticket.ticketCode || "TKT-XXXXX";
+    const customerName = ticket.name || "Customer";
+    
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; padding: 24px; border-radius: 8px;">
+        <p>Dear ${customerName},</p>
+        <p>Thank you for reaching out to us.</p>
+        <p>We have successfully received your support ticket (<strong>${ticketCode}</strong>) and our team is currently working on it.</p>
+        <p>We appreciate your patience while we review the details. We will update you as soon as there is progress or if we require any additional information from you.</p>
+        <p>If you need to add any details to this request, simply reply directly to this email.</p>
+        <br />
+        <p>Best regards,<br /><strong>Built to Break Support Team</strong></p>
+        <hr style="border: 0; border-top: 1px solid #e2e8f0; margin-top: 24px;" />
+        <p style="font-size: 11px; color: #71717a;">Ticket Reference: ${ticketCode} | Subject: ${ticket.subject || "Support Request"}</p>
+      </div>
+    `;
+
     const rawEmail = [
       `To: ${ticket.email}`,
-      `Subject: [ITSM Support] Support Ticket Registered: ${ticket.ticketCode}`,
+      `Subject: Support Ticket Received [${ticketCode}]`,
       `Content-Type: text/html; charset=utf-8`,
       `MIME-Version: 1.0`,
       ``,
-      `<div style="font-family: Arial, sans-serif; background-color: #09090b; color: #e4e4e7; padding: 24px; border-radius: 8px;">`,
-      `  <h2 style="color: #38bdf8; margin-top: 0;">ITS Support Terminal — Ticket Logged</h2>`,
-      `  <p>Dear <strong>${ticket.name}</strong>,</p>`,
-      `  <p>Thank you for submitting a support request. Your ticket has been logged in our ITSM system and automatically assigned to the system administration team.</p>`,
-      `  <div style="background-color: #18181b; padding: 16px; border-left: 4px solid #38bdf8; margin: 16px 0; border-radius: 4px;">`,
-      `    <p style="margin: 4px 0;"><strong>Ticket ID:</strong> <span style="font-family: monospace; color: #fbbf24;">${ticket.ticketCode}</span></p>`,
-      `    <p style="margin: 4px 0;"><strong>Subject:</strong> ${ticket.subject}</p>`,
-      `    <p style="margin: 4px 0;"><strong>Category:</strong> ${ticket.category}</p>`,
-      `    <p style="margin: 4px 0;"><strong>Priority:</strong> ${ticket.priority}</p>`,
-      `    <p style="margin: 4px 0;"><strong>Status:</strong> <span style="color: #4ade80;">${ticket.status}</span></p>`,
-      `    <p style="margin: 4px 0;"><strong>Phone Contact:</strong> ${ticket.phone}</p>`,
-      `  </div>`,
-      `  <p><strong>Description:</strong></p>`,
-      `  <blockquote style="background: #27272a; padding: 12px; border-radius: 4px; color: #a1a1aa; font-style: italic;">${ticket.description}</blockquote>`,
-      `  <p>You can track real-time updates for this ticket in your <strong>User Profile</strong> tab when signed in, or lookup code <code>${ticket.ticketCode}</code> directly in the Support Terminal.</p>`,
-      `  <p style="font-size: 12px; color: #71717a; margin-top: 24px;">This is an automated operational notification from the ITSM Support Terminal.</p>`,
-      `</div>`
+      htmlContent
     ].join("\r\n");
 
     // Base64Url encode string
@@ -762,26 +784,34 @@ export const sendTicketStatusUpdateEmail = async (token, ticket, updateMessage, 
   if (!token || !ticket || !ticket.email) return false;
 
   try {
+    const ticketCode = ticket.ticketCode || "TKT-XXXXX";
+    const customerName = ticket.name || "Customer";
+
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #333333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; padding: 24px; border-radius: 8px;">
+        <p>Dear ${customerName},</p>
+        <p>Thank you for reaching out to us.</p>
+        <p>We have an update regarding your support ticket (<strong>${ticketCode}</strong>):</p>
+        <div style="background-color: #f8fafc; border-left: 4px solid #0284c7; padding: 12px 16px; margin: 16px 0; border-radius: 4px;">
+          <p style="margin: 0 0 8px 0;"><strong>Status:</strong> ${newStatus || ticket.status}</p>
+          <p style="margin: 0;"><strong>Comment / Update:</strong> ${updateMessage || "Your request is being processed."}</p>
+        </div>
+        <p>We appreciate your patience while we review the details. We will update you as soon as there is progress or if we require any additional information from you.</p>
+        <p>If you need to add any details to this request, simply reply directly to this email.</p>
+        <br />
+        <p>Best regards,<br /><strong>Built to Break Support Team</strong></p>
+        <hr style="border: 0; border-top: 1px solid #e2e8f0; margin-top: 24px;" />
+        <p style="font-size: 11px; color: #71717a;">Ticket Reference: ${ticketCode}</p>
+      </div>
+    `;
+
     const rawEmail = [
       `To: ${ticket.email}`,
-      `Subject: [ITSM Support] Ticket Update: ${ticket.ticketCode} - Status: ${newStatus}`,
+      `Subject: Support Ticket Update [${ticketCode}]`,
       `Content-Type: text/html; charset=utf-8`,
       `MIME-Version: 1.0`,
       ``,
-      `<div style="font-family: Arial, sans-serif; background-color: #09090b; color: #e4e4e7; padding: 24px; border-radius: 8px;">`,
-      `  <h2 style="color: #38bdf8; margin-top: 0;">ITS Support Terminal — Ticket Status Update</h2>`,
-      `  <p>Dear <strong>${ticket.name}</strong>,</p>`,
-      `  <p>An update has been posted to your support ticket <strong>${ticket.ticketCode}</strong>.</p>`,
-      `  <div style="background-color: #18181b; padding: 16px; border-left: 4px solid #f59e0b; margin: 16px 0; border-radius: 4px;">`,
-      `    <p style="margin: 4px 0;"><strong>Ticket ID:</strong> <span style="font-family: monospace; color: #fbbf24;">${ticket.ticketCode}</span></p>`,
-      `    <p style="margin: 4px 0;"><strong>Subject:</strong> ${ticket.subject}</p>`,
-      `    <p style="margin: 4px 0;"><strong>New Status:</strong> <span style="color: #38bdf8; font-weight: bold;">${newStatus}</span></p>`,
-      `    <p style="margin: 4px 0;"><strong>Assigned Administrator:</strong> ${ticket.assignedTo || "System Admin"}</p>`,
-      `  </div>`,
-      `  <p><strong>Admin Resolution / Message:</strong></p>`,
-      `  <blockquote style="background: #27272a; padding: 12px; border-radius: 4px; color: #38bdf8;">${updateMessage || "Status updated."}</blockquote>`,
-      `  <p>View your full interaction history under the <strong>User Profile Support Tickets</strong> tab.</p>`,
-      `</div>`
+      htmlContent
     ].join("\r\n");
 
     const encodedEmail = btoa(unescape(encodeURIComponent(rawEmail)))
@@ -798,7 +828,15 @@ export const sendTicketStatusUpdateEmail = async (token, ticket, updateMessage, 
       body: JSON.stringify({ raw: encodedEmail })
     });
 
-    return res.ok;
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn("Gmail API status update send failed:", errText);
+      return false;
+    }
+
+    const data = await res.json();
+    console.log("[GMAIL API SUCCESS] Ticket update email dispatched successfully:", data.id);
+    return true;
   } catch (err) {
     console.error("Gmail API error sending status update email:", err);
     return false;
