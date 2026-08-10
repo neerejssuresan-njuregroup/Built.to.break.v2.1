@@ -2,8 +2,11 @@
 
 > An Interactive Urban Infrastructure Capacity & Fire Risk Vulnerability Audit Platform
 > Developed as part of the BITS Pilani (BITS ZC229T) Design Project carried out at HCLTech, India.
+>
 > 
 License
+https://opensource.org/license/Apache-2.0?
+
 📌 Executive Overview
 Built to Break is a full-stack, data-driven web application and scrollytelling audit engine designed to analyze urban infrastructure deficits, National Building Code (NBC 2016 Part 4) non-compliance, and emergency response bottlenecks across metropolitan India.
 By merging dynamic D3.js telemetry visualizations, Web Audio API acoustic synthesis, spatial mathematical stress simulations, an AI-powered proctoring examination portal (using Google Gemini 2.0 Flash and MediaPipe FaceMesh), and automated Google Workspace ITSM integrations, the platform turns complex architectural codes into an engaging, diagnostic narrative.
