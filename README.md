@@ -8,7 +8,9 @@ License
 https://opensource.org/license/Apache-2.0?
 
 📌 Executive Overview
+
 Built to Break is a full-stack, data-driven web application and scrollytelling audit engine designed to analyze urban infrastructure deficits, National Building Code (NBC 2016 Part 4) non-compliance, and emergency response bottlenecks across metropolitan India.
+
 By merging dynamic D3.js telemetry visualizations, Web Audio API acoustic synthesis, spatial mathematical stress simulations, an AI-powered proctoring examination portal (using Google Gemini 2.0 Flash and MediaPipe FaceMesh), and automated Google Workspace ITSM integrations, the platform turns complex architectural codes into an engaging, diagnostic narrative.
 ✨ Key Features & Capabilities
  * 📜 Interactive Scrollytelling Engine: Synchronizes continuous scroll progress (requestAnimationFrame at 60 FPS) with dynamic D3.js charts rendering 10-year footprint expansion, unauthorized vertical floor height, peak commute routing delays, and cross-metropolitan collapse rankings.
@@ -24,6 +26,7 @@ By merging dynamic D3.js telemetry visualizations, Web Audio API acoustic synthe
  * 🏅 Canvas Certificate Generator (certificateGenerator.js): Client-side HTML5 Canvas rendering engine drawing curved arc text (drawArcText), vector shield icons, and watermarks, exporting A4 Landscape PDFs (jsPDF), high-res PNGs, or print records.
  * 🎫 Enterprise ITSM & Google Workspace Sync (SupportSection.jsx): User ticket logging (TKT-XXXX), automated OAuth Gmail/Nodemailer status dispatches, Google Drive ID uploads, Google Sheets master registry appends, and Google Tasks sync for P1/P2 issues.
 🏗️ System Architecture & Stack Overview
+
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                       CLIENT SIDE (React 19 SPA)                        │
 │  ┌───────────────────────┐ ┌───────────────────────┐ ┌─────────────────┐ │
@@ -67,6 +70,7 @@ By merging dynamic D3.js telemetry visualizations, Web Audio API acoustic synthe
 4. Utilities & Integrations
  * Nodemailer v9.0.3 & Gmail API: Dual-dispatch automated email notification pipeline with Nodemailer SMTP fallback.
  * jsPDF v4.2.1 & html2canvas v1.4.1: Client-side HTML5 Canvas text-path rendering engine generating vector watermarked A4 landscape compliance certificates.
+ * 
 🛡️ Security Audit Scores & Compliance Benchmarks
 The platform underwent rigorous security audit benchmarks evaluating input sanitization, API rate limiting, identity masking, and privilege escalation resistance.
 Overall Security Scorecard: 98 / 100 (Grade: A+)
@@ -91,6 +95,7 @@ Calculated inside data.js and bounded between 5 and 100 points:
  * Exit Deficit Hazard: H_{\text{exit}} = \left(1 - \frac{E_{\text{count}}}{4}\right) \times 15
 2. Emergency Response Delay (D_{\text{response}})
 When W_{\text{lane}} < 2.0\text{ meters}, tenders are blocked, forcing manual hose deployment over distance S, adding \Delta D_{\text{width}} = 8.5 + 0.15 \times S\text{ minutes}.
+
 👥 Project Team & Codebase Ownership
 The entire codebase comprises 40 modular files cleanly divided across the team based on designated domain roles:
 | Team Member | Student ID | Corporate Role (HCLTech) | Designated Project Role | Files Owned |
@@ -100,6 +105,7 @@ The entire codebase comprises 40 modular files cleanly divided across the team b
 | Amisha Rathish | 202417BH052 | Automation Testing Specialist (Embedded) | Data Telemetry Engineer & QA Tester | 5 Files |
 | Shraddha Jitendra | 202417BH071 | Functional Testing Specialist (Embedded) | Typography & Mobile Layout Ergonomist | 4 Files |
 | Anupam Anand | 202417BH029 | Functional Testing Specialist (Mobile/Dev) | Atmospheric UI & Visual Designer | 4 Files |
+
 ⚡ Quick Start & Installation
 Prerequisites
  * Node.js: v18.x or higher
@@ -134,7 +140,7 @@ SMTP_HOST="smtp.gmail.com"
 SMTP_PORT=587
 SMTP_USER="your_email@gmail.com"
 SMTP_PASS="your_app_password"
-SMTP_FROM="Built to Break Support <support@builttobreak.delhi.gov.in>"
+SMTP_FROM="Built to Break Support ( Mail) "
 
 4. Database Schema Migration
 Generate and apply Drizzle ORM migrations to PostgreSQL:
@@ -157,10 +163,13 @@ npm start
 🛡️ Security & Privacy Compliance
  * DPDP Act (2023) Compliance: Candidate Aadhaar and PAN IDs captured during exam registration are automatically masked (maskSensitiveId()) on both client and server layers.
  * XSS Sanitization: xssSanitizerMiddleware recursively cleans all incoming req.body, req.query, and req.params payload strings.
+ * 
  * Admin Authentication: Administrative access requires SHA-256 salted password verification (NBC_ADMIN_ID_SALT_2026).
 🏛️ Industry Supervision & Mentorship
  * Charanjeet Singh — Senior Software Engineer, PayU Finance, Gurugram, India (Industry Mentor & External Supervisor)
  * Anjali Paul — Associate Consultant, Digital Foundation Services (DFS) Middleware, HCLTech, India (Subject Matter Expert)
  * Birla Institute of Technology & Science (BITS), Pilani — Academic Partner (BITS ZC229T Design Project)
+
+ * 
 📄 License
 Distributed under the Apache License 2.0. See LICENSE for more information.
