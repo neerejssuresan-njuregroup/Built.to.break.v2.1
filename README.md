@@ -10,7 +10,7 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.8.2-3178C6?logo=typescript)
 ![TailwindCSS](https://img.shields.io/badge/TailwindCSS-v4-38B2AC?logo=tailwind-css)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Drizzle_ORM-4169E1?logo=postgresql)
-![Google Gemini](https://img.shields.io/badge/AI-Gemini_2.0_Flash-8E75B2?logo=google-gemini)
+![Google Gemini](https://img.shields.io/badge/AI-Gemini_3.6_Flash-8E75B2?logo=google-gemini)
 
 ---
 
