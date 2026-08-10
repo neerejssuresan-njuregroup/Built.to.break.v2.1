@@ -170,6 +170,30 @@ npm start
  * Anjali Paul — Associate Consultant, Digital Foundation Services (DFS) Middleware, HCLTech, India (Subject Matter Expert)
  * Birla Institute of Technology & Science (BITS), Pilani — Academic Partner (BITS ZC229T Design Project)
 
+Live Application Status
+The Built to Break: Urban Scrollytelling Audit Platform live web application is hosted on Google Cloud Run:
+🌐 Live Application URL: https://built-to-break-urban-scrollytelling-804593223320.asia-southeast1.run.app/
+Key Capabilities Hosted on the Live Environment
+┌────────────────────────────────────────────────────────────────────────┐
+│                        LIVE CLOUD RUN SERVICE                          │
+├────────────────────────────────────────────────────────────────────────┤
+│ • 60 FPS Scrollytelling Engine with D3.js Data Telemetry               │
+│ • Web Audio API Dynamic Sound Tension Wave Generator                   │
+│ • Interactive Spatial Risk Simulator (NCT Delhi & National Metros)     │
+│ • Forensic Documentary Portal & Architectural Blueprint Inspection     │
+│ • Proctored Assessment Suite with Gemini 2.0 Multimodal AI Vision      │
+│ • MediaPipe FaceMesh (WASM) Zero-Token Offline Client Fallback         │
+│ • Live Admin Oversight Console & Real-time Socket.IO Websockets        │
+│ • Enterprise ITSM Support Desk & Google Workspace Integration          │
+└────────────────────────────────────────────────────────────────────────┘
+
+Architecture Highlights
+ * Google Cloud Run Deployment: Serves static frontend assets compiled via Vite alongside a Node.js/Express server bundled with esbuild.
+ * PostgreSQL & Drizzle ORM Database Connection: Connects over Cloud SQL Auth Proxy to persist candidate sessions, compliance certificates, and ITSM support tickets.
+ * AI Proctoring API: Integrates @google/genai (Google GenAI SDK) for multi-tiered video and audio proctoring evaluations on /api/proctor/gemini-verify.
+ * Google Workspace Sync: Enables OAuth 2.0 authorization for Google Drive identity uploads, Google Sheets certificate registry, Gmail API dispatches, and Google Tasks sync.
+ * 
+
  * 
 📄 License
 Distributed under the Apache License 2.0. See LICENSE for more information.
